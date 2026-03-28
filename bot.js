@@ -429,16 +429,6 @@ function getMultipleNumbersByCountryAndService(countryCode, service, userId, cou
   return numbers;
 }
 
-function maskPhoneNumber(phone) {
-  const digitsOnly = phone.replace(/\D/g, '');
-  const total = digitsOnly.length;
-  if (total <= 7) return phone;
-  const showStart = Math.max(total - 6, 4);
-  const startPart = digitsOnly.slice(0, showStart);
-  const endPart = digitsOnly.slice(showStart + 3);
-  return `${startPart}ⓎⓄⓊ${endPart}`;
-}
-
 function extractPhoneNumberFromMessage(text) {
   if (!text) return null;
   const fullMatch = text.match(/\+?(\d{10,15})/);
@@ -1125,7 +1115,11 @@ async function autoRestoreOnStart() {
     if (Object.keys(users).length === 0) {
       console.log('⚠️ Current data empty! Restoring from backup...');
       await restoreFromTelegramBackup(latestBackup.fileId);
+    } else {
+      console.log(`✅ Current data has ${Object.keys(users).length} users. No restore needed.`);
     }
+  } else {
+    console.log('📭 No backup found in group');
   }
 }
 
@@ -1152,8 +1146,14 @@ bot.command("emergency_restore", async (ctx) => {
   if (!latestBackup) {
     return await ctx.reply("❌ *No backup found*", { parse_mode: "Markdown" });
   }
+  const backupDate = new Date(latestBackup.timestamp.replace(/-/g, ':')).toLocaleString('en-GB');
   await ctx.reply(
-    `📦 *Backup Found*\n\n📁 File: ${latestBackup.fileName}\n\n⚠️ *WARNING:* This will overwrite current data!\nType /confirm_restore to proceed.`,
+    `📦 *Backup Found*\n\n` +
+    `📁 File: ${latestBackup.fileName}\n` +
+    `📅 Date: ${backupDate}\n\n` +
+    `⚠️ *WARNING:* This will overwrite current data!\n` +
+    `Type /confirm_restore to proceed.\n` +
+    `Type /cancel to abort.`,
     { parse_mode: "Markdown" }
   );
   ctx.session.pendingRestore = latestBackup.fileId;
@@ -1169,11 +1169,62 @@ bot.command("confirm_restore", async (ctx) => {
   await ctx.reply("⏳ *Restoring from backup...*", { parse_mode: "Markdown" });
   const restored = await restoreFromTelegramBackup(ctx.session.pendingRestore);
   if (restored) {
-    await ctx.reply(`✅ *Restore Successful!*\n📦 Backup: ${restored.backupId}\n👥 Users: ${restored.stats.totalUsers}`, { parse_mode: "Markdown" });
+    await ctx.reply(
+      `✅ *RESTORE SUCCESSFUL!*\n\n` +
+      `📦 Backup: ${restored.backupId}\n` +
+      `👥 Users: ${restored.stats.totalUsers}\n` +
+      `💰 Total Earned: ${restored.stats.totalEarnings.toFixed(2)} TK\n` +
+      `💵 Pending Balance: ${restored.stats.totalBalance.toFixed(2)} TK`,
+      { parse_mode: "Markdown" }
+    );
   } else {
     await ctx.reply("❌ *Restore failed*", { parse_mode: "Markdown" });
   }
   ctx.session.pendingRestore = null;
+});
+
+bot.command("backup_list_telegram", async (ctx) => {
+  if (!ctx.session.isAdmin && !isAdmin(ctx.from.id.toString())) {
+    return await ctx.reply("❌ Admin only");
+  }
+  await ctx.reply("🔍 *Fetching backup list...*", { parse_mode: "Markdown" });
+  
+  try {
+    const messages = await bot.telegram.getChatHistory(BACKUP_GROUP_ID, 50);
+    const backups = [];
+    
+    for (const msg of messages) {
+      if (msg.document && msg.document.file_name && msg.document.file_name.endsWith('.json')) {
+        const match = msg.document.file_name.match(/BACKUP_([\d\-T]+)\.json/);
+        if (match) {
+          backups.push({
+            name: msg.document.file_name,
+            date: match[1],
+            size: (msg.document.file_size / 1024).toFixed(2)
+          });
+        }
+      }
+    }
+    
+    if (backups.length === 0) {
+      return await ctx.reply("📭 *No backups found*", { parse_mode: "Markdown" });
+    }
+    
+    let message = "📦 *Telegram Backups*\n\n";
+    backups.slice(0, 10).forEach((b, i) => {
+      const date = new Date(b.date.replace(/-/g, ':')).toLocaleString('en-GB');
+      message += `${i+1}. ${b.name}\n`;
+      message += `   📅 ${date} | 💾 ${b.size} KB\n\n`;
+    });
+    
+    message += `\n💡 Use /emergency_restore to restore latest backup`;
+    
+    await ctx.reply(message, { parse_mode: "Markdown" });
+    
+  } catch (error) {
+    console.error('Backup list error:', error);
+    await ctx.reply("❌ Error fetching backup list. Make sure bot is admin in backup group.");
+  }
 });
 
 bot.command("cancel", async (ctx) => {
@@ -2342,19 +2393,31 @@ bot.command("admin", async (ctx) => {
   }
 });
 
-/******************** ADMIN BACKUP ********************/
+/******************** ADMIN BACKUP MENU ********************/
 bot.action("admin_backup", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
   
+  let backupInfo = "";
+  try {
+    const latestBackup = await findLatestBackup();
+    if (latestBackup) {
+      const backupDate = new Date(latestBackup.timestamp.replace(/-/g, ':')).toLocaleString('en-GB');
+      backupInfo = `\n📦 *Latest Backup:* ${latestBackup.fileName}\n📅 *Date:* ${backupDate}\n`;
+    } else {
+      backupInfo = `\n⚠️ *No backups found* - Create one first!\n`;
+    }
+  } catch(e) {}
+  
   await ctx.editMessageText(
-    "📦 *Backup Management*\n\nSelect an option:",
+    `📦 *Backup Management*${backupInfo}\n\nSelect an option:`,
     {
       parse_mode: "Markdown",
       reply_markup: {
         inline_keyboard: [
           [{ text: "🆕 Create Backup", callback_data: "admin_create_backup" }],
           [{ text: "🔄 Emergency Restore", callback_data: "admin_emergency_restore" }],
+          [{ text: "📋 View Backups", callback_data: "admin_view_backups" }],
           [{ text: "🔙 Back", callback_data: "admin_back" }]
         ]
       }
@@ -2381,10 +2444,248 @@ bot.action("admin_emergency_restore", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
   
-  await ctx.editMessageText(
-    "⚠️ *Emergency Restore*\n\nThis will restore the latest backup from Telegram.\n\n⚠️ WARNING: Current data will be overwritten!\n\nUse /emergency_restore command to proceed.",
-    { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_backup" }]] } }
+  const loadingMsg = await ctx.editMessageText(
+    "🔍 *Searching for latest backup...*\n\nPlease wait...",
+    { parse_mode: "Markdown" }
   );
+  
+  try {
+    const latestBackup = await findLatestBackup();
+    
+    if (!latestBackup) {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        loadingMsg.message_id,
+        null,
+        "❌ *No backup found in the backup group.*\n\nPlease create a backup first using 'Create Backup' button.",
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "🔙 Back to Backup Menu", callback_data: "admin_backup" }]
+            ]
+          }
+        }
+      );
+      return;
+    }
+    
+    const backupDate = new Date(latestBackup.timestamp.replace(/-/g, ':')).toLocaleString('en-GB');
+    
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      loadingMsg.message_id,
+      null,
+      `📦 *Backup Found*\n\n` +
+      `📁 *File:* ${latestBackup.fileName}\n` +
+      `📅 *Date:* ${backupDate}\n\n` +
+      `⚠️ *WARNING:* This will overwrite ALL current data!\n\n` +
+      `Type /confirm_restore to proceed.\n` +
+      `Type /cancel to abort.`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "✅ Confirm Restore", callback_data: "admin_confirm_restore" },
+              { text: "❌ Cancel", callback_data: "admin_backup" }
+            ]
+          ]
+        }
+      }
+    );
+    
+    ctx.session.pendingRestore = latestBackup.fileId;
+    
+  } catch (error) {
+    console.error("Emergency restore error:", error);
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      loadingMsg.message_id,
+      null,
+      `❌ *Error searching for backup*\n\n${error.message}`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🔙 Back to Backup Menu", callback_data: "admin_backup" }]
+          ]
+        }
+      }
+    );
+  }
+});
+
+bot.action("admin_confirm_restore", async (ctx) => {
+  if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
+  
+  if (!ctx.session.pendingRestore) {
+    await ctx.answerCbQuery("❌ No pending restore found");
+    return await ctx.editMessageText(
+      "❌ *No restore pending.*\n\nPlease use 'Emergency Restore' first.",
+      {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🔙 Back to Backup Menu", callback_data: "admin_backup" }]
+          ]
+        }
+      }
+    );
+  }
+  
+  await ctx.answerCbQuery("⏳ Restoring backup...");
+  
+  const loadingMsg = await ctx.editMessageText(
+    "⏳ *Restoring from backup...*\n\nThis may take a moment.\nPlease do not close this message.",
+    { parse_mode: "Markdown" }
+  );
+  
+  try {
+    const restored = await restoreFromTelegramBackup(ctx.session.pendingRestore);
+    
+    if (restored) {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        loadingMsg.message_id,
+        null,
+        `✅ *RESTORE SUCCESSFUL!*\n\n` +
+        `📦 Backup: ${restored.backupId}\n` +
+        `👥 Users: ${restored.stats.totalUsers}\n` +
+        `💰 Total Earned: ${restored.stats.totalEarnings.toFixed(2)} TK\n` +
+        `💵 Pending Balance: ${restored.stats.totalBalance.toFixed(2)} TK\n\n` +
+        `⚠️ The bot has been restored to the backup state.`,
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "🛠 Back to Admin Panel", callback_data: "admin_back" }]
+            ]
+          }
+        }
+      );
+      
+      for (const adminId of admins) {
+        try {
+          await bot.telegram.sendMessage(
+            adminId,
+            `✅ *System Restored*\n\n` +
+            `Backup: ${restored.backupId}\n` +
+            `Users: ${restored.stats.totalUsers}\n` +
+            `Earnings: ${restored.stats.totalEarnings.toFixed(2)} TK\n\n` +
+            `Restored by: ${ctx.from.first_name}`,
+            { parse_mode: "Markdown" }
+          );
+        } catch(e) {}
+      }
+      
+    } else {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        loadingMsg.message_id,
+        null,
+        "❌ *RESTORE FAILED*\n\nCould not restore from backup. The backup file may be corrupted.",
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "🔙 Back to Backup Menu", callback_data: "admin_backup" }]
+            ]
+          }
+        }
+      );
+    }
+    
+    ctx.session.pendingRestore = null;
+    
+  } catch (error) {
+    console.error("Confirm restore error:", error);
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      loadingMsg.message_id,
+      null,
+      `❌ *RESTORE ERROR*\n\n${error.message}`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🔙 Back to Backup Menu", callback_data: "admin_backup" }]
+          ]
+        }
+      }
+    );
+    ctx.session.pendingRestore = null;
+  }
+});
+
+bot.action("admin_view_backups", async (ctx) => {
+  if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
+  await ctx.answerCbQuery();
+  
+  try {
+    const messages = await bot.telegram.getChatHistory(BACKUP_GROUP_ID, 50);
+    const backups = [];
+    
+    for (const msg of messages) {
+      if (msg.document && msg.document.file_name && msg.document.file_name.endsWith('.json')) {
+        const match = msg.document.file_name.match(/BACKUP_([\d\-T]+)\.json/);
+        if (match) {
+          backups.push({
+            name: msg.document.file_name,
+            date: match[1],
+            size: (msg.document.file_size / 1024).toFixed(2)
+          });
+        }
+      }
+    }
+    
+    if (backups.length === 0) {
+      return await ctx.editMessageText(
+        "📭 *No backups found*\n\nPlease create a backup first using 'Create Backup'.",
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "🔙 Back to Backup Menu", callback_data: "admin_backup" }]
+            ]
+          }
+        }
+      );
+    }
+    
+    let message = "📦 *Available Backups*\n\n";
+    backups.slice(0, 10).forEach((b, i) => {
+      const date = new Date(b.date.replace(/-/g, ':')).toLocaleString('en-GB');
+      message += `${i+1}. \`${b.name}\`\n`;
+      message += `   📅 ${date} | 💾 ${b.size} KB\n\n`;
+    });
+    
+    message += `💡 Use "Emergency Restore" to restore the latest backup.`;
+    
+    await ctx.editMessageText(message, {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔄 Emergency Restore", callback_data: "admin_emergency_restore" }],
+          [{ text: "🔙 Back", callback_data: "admin_backup" }]
+        ]
+      }
+    });
+    
+  } catch (error) {
+    console.error("View backups error:", error);
+    await ctx.editMessageText(
+      "❌ *Error loading backups*\n\nMake sure the backup group exists and bot is admin there.",
+      {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🔙 Back", callback_data: "admin_backup" }]
+          ]
+        }
+      }
+    );
+  }
 });
 
 /******************** ADMIN BACK ********************/
@@ -2784,68 +3085,26 @@ bot.action("admin_manage_services", async (ctx) => {
   );
 });
 
-/******************** ADMIN MANAGE COUNTRIES ********************/
-bot.action("admin_manage_countries", async (ctx) => {
+/******************** ADMIN LIST SERVICES ********************/
+bot.action("admin_list_services", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
 
-  let countryList = "🌍 *Manage Countries*\n\n";
-  countryList += `📊 Total Countries: *${Object.keys(countries).length}*\n\n`;
+  let report = "📋 *Services List*\n\n";
 
-  await ctx.editMessageText(countryList, {
+  for (const serviceId in services) {
+    const service = services[serviceId];
+    report += `• ${service.icon} *${service.name}* (ID: \`${serviceId}\`)\n`;
+  }
+
+  await ctx.editMessageText(report, {
     parse_mode: "Markdown",
     reply_markup: {
       inline_keyboard: [
-        [
-          { text: "➕ Add Country", callback_data: "admin_add_country" },
-          { text: "📋 List Countries", callback_data: "admin_list_countries" }
-        ],
         [{ text: "🔙 Back", callback_data: "admin_back" }]
       ]
     }
   });
-});
-
-/******************** ADMIN LIST COUNTRIES ********************/
-bot.action("admin_list_countries", async (ctx) => {
-  if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
-  await ctx.answerCbQuery();
-  let text = "🌍 *Country List*\n\n";
-  for (const cc in countries) {
-    const c = countries[cc];
-    const price = countryPrices[cc] !== undefined ? countryPrices[cc] : (settings.defaultOtpPrice || 0.25);
-    text += `${c.flag} *${c.name}* (+${cc}) — ${price.toFixed(2)} TK/OTP\n`;
-  }
-  await ctx.editMessageText(text, {
-    parse_mode: "Markdown",
-    reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_manage_countries" }]] }
-  });
-});
-
-/******************** ADMIN ADD COUNTRY ********************/
-bot.action("admin_add_country", async (ctx) => {
-  if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
-  await ctx.answerCbQuery();
-
-  ctx.session.adminState = "waiting_add_country";
-
-  await ctx.editMessageText(
-    "🌍 *Add New Country*\n\n" +
-    "Send in format:\n`[countryCode] [name] [flag]`\n\n" +
-    "*Examples:*\n" +
-    "`880 Bangladesh 🇧🇩`\n" +
-    "`91 India 🇮🇳`\n" +
-    "`1 USA 🇺🇸`\n\n" +
-    "Note: Country code is dialing code (without +).",
-    {
-      parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "❌ Cancel", callback_data: "admin_cancel" }]
-        ]
-      }
-    }
-  );
 });
 
 /******************** ADMIN ADD SERVICE ********************/
@@ -2958,126 +3217,64 @@ bot.action(/^admin_delete_service_execute:(.+)$/, async (ctx) => {
   );
 });
 
-/******************** ADMIN LIST SERVICES ********************/
-bot.action("admin_list_services", async (ctx) => {
+/******************** ADMIN MANAGE COUNTRIES ********************/
+bot.action("admin_manage_countries", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
 
-  let report = "📋 *Services List*\n\n";
+  let countryList = "🌍 *Manage Countries*\n\n";
+  countryList += `📊 Total Countries: *${Object.keys(countries).length}*\n\n`;
 
-  for (const serviceId in services) {
-    const service = services[serviceId];
-    report += `• ${service.icon} *${service.name}* (ID: \`${serviceId}\`)\n`;
-  }
-
-  await ctx.editMessageText(report, {
+  await ctx.editMessageText(countryList, {
     parse_mode: "Markdown",
     reply_markup: {
       inline_keyboard: [
+        [
+          { text: "➕ Add Country", callback_data: "admin_add_country" },
+          { text: "📋 List Countries", callback_data: "admin_list_countries" }
+        ],
         [{ text: "🔙 Back", callback_data: "admin_back" }]
       ]
     }
   });
 });
 
-/******************** ADMIN DELETE NUMBERS ********************/
-bot.action("admin_delete", async (ctx) => {
+/******************** ADMIN LIST COUNTRIES ********************/
+bot.action("admin_list_countries", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-
-  let report = "❌ *Delete Numbers*\n\n";
-  report += "Select which numbers to delete:\n\n";
-
-  const buttons = [];
-
-  for (const countryCode in numbersByCountryService) {
-    const country = countries[countryCode];
-    const countryName = country ? `${country.flag} ${country.name}` : `Country ${countryCode}`;
-
-    report += `${countryName} (+${countryCode}):\n`;
-
-    for (const serviceId in numbersByCountryService[countryCode]) {
-      const service = services[serviceId];
-      const count = numbersByCountryService[countryCode][serviceId].length;
-
-      if (count > 0) {
-        report += `  ${service?.icon || '📞'} ${service?.name || serviceId}: ${count}\n`;
-
-        buttons.push([
-          { 
-            text: `🗑️ ${countryCode}/${serviceId} (${count})`, 
-            callback_data: `admin_delete_confirm:${countryCode}:${serviceId}` 
-          }
-        ]);
-      }
-    }
-    report += "\n";
+  let text = "🌍 *Country List*\n\n";
+  for (const cc in countries) {
+    const c = countries[cc];
+    const price = countryPrices[cc] !== undefined ? countryPrices[cc] : (settings.defaultOtpPrice || 0.25);
+    text += `${c.flag} *${c.name}* (+${cc}) — ${price.toFixed(2)} TK/OTP\n`;
   }
-
-  buttons.push([{ text: "❌ Cancel", callback_data: "admin_cancel" }]);
-
-  await ctx.editMessageText(report, {
+  await ctx.editMessageText(text, {
     parse_mode: "Markdown",
-    reply_markup: { inline_keyboard: buttons }
+    reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_manage_countries" }]] }
   });
 });
 
-bot.action(/^admin_delete_confirm:(.+):(.+)$/, async (ctx) => {
+/******************** ADMIN ADD COUNTRY ********************/
+bot.action("admin_add_country", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
 
-  const countryCode = ctx.match[1];
-  const serviceId = ctx.match[2];
-
-  const count = numbersByCountryService[countryCode]?.[serviceId]?.length || 0;
+  ctx.session.adminState = "waiting_add_country";
 
   await ctx.editMessageText(
-    `⚠️ *Confirm Deletion*\n\n` +
-    `Are you sure you want to delete ${count} numbers?\n` +
-    `Country: ${countryCode}\n` +
-    `Service: ${services[serviceId]?.name || serviceId}\n\n` +
-    `This action cannot be undone!`,
+    "🌍 *Add New Country*\n\n" +
+    "Send in format:\n`[countryCode] [name] [flag]`\n\n" +
+    "*Examples:*\n" +
+    "`880 Bangladesh 🇧🇩`\n" +
+    "`91 India 🇮🇳`\n" +
+    "`1 USA 🇺🇸`\n\n" +
+    "Note: Country code is dialing code (without +).",
     {
       parse_mode: "Markdown",
       reply_markup: {
         inline_keyboard: [
-          [
-            { text: "✅ Yes, Delete", callback_data: `admin_delete_execute:${countryCode}:${serviceId}` },
-            { text: "❌ Cancel", callback_data: "admin_back" }
-          ]
-        ]
-      }
-    }
-  );
-});
-
-bot.action(/^admin_delete_execute:(.+):(.+)$/, async (ctx) => {
-  if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
-  await ctx.answerCbQuery();
-
-  const countryCode = ctx.match[1];
-  const serviceId = ctx.match[2];
-
-  const count = numbersByCountryService[countryCode]?.[serviceId]?.length || 0;
-
-  delete numbersByCountryService[countryCode][serviceId];
-
-  if (Object.keys(numbersByCountryService[countryCode]).length === 0) {
-    delete numbersByCountryService[countryCode];
-  }
-
-  saveNumbers();
-
-  await ctx.editMessageText(
-    `✅ *Deleted Successfully*\n\n` +
-    `🗑️ Deleted ${count} numbers\n` +
-    `📌 Country: ${countryCode}\n` +
-    `🔧 Service: ${services[serviceId]?.name || serviceId}`,
-    {
-      parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "🔙 Back to Admin", callback_data: "admin_back" }]
+          [{ text: "❌ Cancel", callback_data: "admin_cancel" }]
         ]
       }
     }
@@ -3501,6 +3698,110 @@ bot.action("admin_all_withdrawals", async (ctx) => {
       });
     } catch(e) {}
   }
+});
+
+/******************** ADMIN DELETE NUMBERS ********************/
+bot.action("admin_delete", async (ctx) => {
+  if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
+  await ctx.answerCbQuery();
+
+  let report = "❌ *Delete Numbers*\n\n";
+  report += "Select which numbers to delete:\n\n";
+
+  const buttons = [];
+
+  for (const countryCode in numbersByCountryService) {
+    const country = countries[countryCode];
+    const countryName = country ? `${country.flag} ${country.name}` : `Country ${countryCode}`;
+
+    report += `${countryName} (+${countryCode}):\n`;
+
+    for (const serviceId in numbersByCountryService[countryCode]) {
+      const service = services[serviceId];
+      const count = numbersByCountryService[countryCode][serviceId].length;
+
+      if (count > 0) {
+        report += `  ${service?.icon || '📞'} ${service?.name || serviceId}: ${count}\n`;
+
+        buttons.push([
+          { 
+            text: `🗑️ ${countryCode}/${serviceId} (${count})`, 
+            callback_data: `admin_delete_confirm:${countryCode}:${serviceId}` 
+          }
+        ]);
+      }
+    }
+    report += "\n";
+  }
+
+  buttons.push([{ text: "❌ Cancel", callback_data: "admin_cancel" }]);
+
+  await ctx.editMessageText(report, {
+    parse_mode: "Markdown",
+    reply_markup: { inline_keyboard: buttons }
+  });
+});
+
+bot.action(/^admin_delete_confirm:(.+):(.+)$/, async (ctx) => {
+  if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
+  await ctx.answerCbQuery();
+
+  const countryCode = ctx.match[1];
+  const serviceId = ctx.match[2];
+
+  const count = numbersByCountryService[countryCode]?.[serviceId]?.length || 0;
+
+  await ctx.editMessageText(
+    `⚠️ *Confirm Deletion*\n\n` +
+    `Are you sure you want to delete ${count} numbers?\n` +
+    `Country: ${countryCode}\n` +
+    `Service: ${services[serviceId]?.name || serviceId}\n\n` +
+    `This action cannot be undone!`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "✅ Yes, Delete", callback_data: `admin_delete_execute:${countryCode}:${serviceId}` },
+            { text: "❌ Cancel", callback_data: "admin_back" }
+          ]
+        ]
+      }
+    }
+  );
+});
+
+bot.action(/^admin_delete_execute:(.+):(.+)$/, async (ctx) => {
+  if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
+  await ctx.answerCbQuery();
+
+  const countryCode = ctx.match[1];
+  const serviceId = ctx.match[2];
+
+  const count = numbersByCountryService[countryCode]?.[serviceId]?.length || 0;
+
+  delete numbersByCountryService[countryCode][serviceId];
+
+  if (Object.keys(numbersByCountryService[countryCode]).length === 0) {
+    delete numbersByCountryService[countryCode];
+  }
+
+  saveNumbers();
+
+  await ctx.editMessageText(
+    `✅ *Deleted Successfully*\n\n` +
+    `🗑️ Deleted ${count} numbers\n` +
+    `📌 Country: ${countryCode}\n` +
+    `🔧 Service: ${services[serviceId]?.name || serviceId}`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔙 Back to Admin", callback_data: "admin_back" }]
+        ]
+      }
+    }
+  );
 });
 
 /******************** TEXT INPUT HANDLER ********************/
@@ -3995,6 +4296,7 @@ async function startBot() {
     console.log("🚀 Starting Number Bot...");
     console.log("✅ Verification system: FIXED");
     console.log("✅ Backup system: ACTIVE");
+    console.log("✅ Auto-restore: ENABLED");
     console.log("=====================================");
 
     await bot.launch({
