@@ -19,7 +19,7 @@ const CHAT_GROUP_ID = -1001153782407;
 const OTP_GROUP = "https://t.me/otpreceived1";
 const OTP_GROUP_ID = -1001153782407;
 
-// ব্যাকআপ গ্রুপ আইডি
+// ব্যাকআপ গ্রুপ আইডি (আপনার দেওয়া নতুন আইডি)
 const BACKUP_GROUP_ID = -1003732536424;
 const AUTO_RESTORE_ON_START = true;
 
@@ -971,7 +971,7 @@ bot.action("verify_user", async (ctx) => {
   }
 });
 
-/******************** TELEGRAM BACKUP SYSTEM - UPDATED & FIXED ********************/
+/******************** TELEGRAM BACKUP SYSTEM - FULLY FIXED ********************/
 let lastBackupInfo = null;
 
 async function createTelegramBackup(isAuto = true) {
@@ -1014,9 +1014,11 @@ async function createTelegramBackup(isAuto = true) {
     
     await bot.telegram.sendDocument(BACKUP_GROUP_ID, { source: buffer, filename: `${backupId}.json` }, { caption: message, parse_mode: 'Markdown' });
     
+    // লোকাল ফাইলেও সেভ করুন
     const localBackupPath = path.join(DATA_DIR, `${backupId}.json`);
     fs.writeFileSync(localBackupPath, jsonString);
     
+    // last backup info সেভ করুন
     const backupInfo = { backupId: backupId, timestamp: backupData.timestamp, stats: backupData.stats, localPath: localBackupPath };
     fs.writeFileSync(path.join(DATA_DIR, "last_backup.json"), JSON.stringify(backupInfo, null, 2));
     
@@ -1030,6 +1032,7 @@ async function createTelegramBackup(isAuto = true) {
 
 async function findLatestBackup() {
   try {
+    // 1. প্রথমে লোকাল ফাইল চেক করুন
     const lastBackupFile = path.join(DATA_DIR, "last_backup.json");
     if (fs.existsSync(lastBackupFile)) {
       try {
@@ -1037,42 +1040,72 @@ async function findLatestBackup() {
         const localFile = path.join(DATA_DIR, `${info.backupId}.json`);
         if (fs.existsSync(localFile)) {
           console.log(`📦 Found local backup: ${info.backupId}`);
-          return { fileId: null, fileName: `${info.backupId}.json`, timestamp: info.timestamp, localPath: localFile };
+          return { fileId: null, fileName: `${info.backupId}.json`, timestamp: info.timestamp, localPath: localFile, stats: info.stats };
         }
       } catch(e) {}
     }
     
-    console.log('🔍 Searching Telegram...');
-    const messages = await bot.telegram.getChatHistory(BACKUP_GROUP_ID, 50);
-    let latest = null;
-    for (const msg of messages) {
-      if (msg.document && msg.document.file_name && msg.document.file_name.endsWith('.json')) {
-        const match = msg.document.file_name.match(/BACKUP_([\d\-T]+)\.json/);
-        if (match) {
-          const timestamp = match[1];
-          if (!latest || timestamp > latest.timestamp) {
-            latest = { fileId: msg.document.file_id, fileName: msg.document.file_name, timestamp: timestamp };
+    // 2. Telegram থেকে খুঁজুন
+    console.log('🔍 Searching Telegram for backups...');
+    let latestBackup = null;
+    let latestTimestamp = null;
+    
+    try {
+      const messages = await bot.telegram.getChatHistory(BACKUP_GROUP_ID, 100);
+      
+      for (const msg of messages) {
+        if (msg.document && msg.document.file_name && msg.document.file_name.endsWith('.json')) {
+          const match = msg.document.file_name.match(/BACKUP_([\d\-T]+)\.json/);
+          if (match) {
+            const timestamp = match[1];
+            if (!latestTimestamp || timestamp > latestTimestamp) {
+              latestTimestamp = timestamp;
+              latestBackup = {
+                messageId: msg.message_id,
+                fileId: msg.document.file_id,
+                fileName: msg.document.file_name,
+                timestamp: timestamp,
+                fileSize: msg.document.file_size
+              };
+              console.log(`📦 Found backup: ${latestBackup.fileName}`);
+            }
           }
         }
       }
+    } catch (error) {
+      console.error('Error fetching messages:', error.message);
     }
     
-    if (latest) {
+    // 3. পাওয়া গেলে লোকাল কপি সেভ করুন
+    if (latestBackup) {
       try {
-        const fileLink = await bot.telegram.getFileLink(latest.fileId);
+        const fileLink = await bot.telegram.getFileLink(latestBackup.fileId);
         const response = await fetch(fileLink.href);
         const jsonText = await response.text();
         const backupData = JSON.parse(jsonText);
-        const localBackupPath = path.join(DATA_DIR, latest.fileName);
+        
+        const localBackupPath = path.join(DATA_DIR, latestBackup.fileName);
         fs.writeFileSync(localBackupPath, jsonText);
-        const backupInfo = { backupId: latest.fileName.replace('.json', ''), timestamp: latest.timestamp, stats: backupData.stats, localPath: localBackupPath };
+        
+        const backupInfo = {
+          backupId: latestBackup.fileName.replace('.json', ''),
+          timestamp: latestBackup.timestamp,
+          stats: backupData.stats,
+          localPath: localBackupPath
+        };
         fs.writeFileSync(path.join(DATA_DIR, "last_backup.json"), JSON.stringify(backupInfo, null, 2));
-        latest.localPath = localBackupPath;
-      } catch(e) {}
+        
+        latestBackup.localPath = localBackupPath;
+        latestBackup.stats = backupData.stats;
+        
+      } catch(e) {
+        console.error('Failed to download backup:', e.message);
+      }
     }
-    return latest;
+    
+    return latestBackup;
   } catch (error) {
-    console.error('Find backup error:', error);
+    console.error('Find latest backup error:', error);
     return null;
   }
 }
@@ -1080,21 +1113,45 @@ async function findLatestBackup() {
 async function restoreFromTelegramBackup(backupFileId, localPath = null) {
   try {
     let backupData = null;
+    
     if (localPath && fs.existsSync(localPath)) {
+      console.log('🔄 Restoring from local backup...');
       const jsonText = fs.readFileSync(localPath, 'utf8');
       backupData = JSON.parse(jsonText);
     } else if (backupFileId) {
+      console.log('🔄 Downloading from Telegram...');
       const fileLink = await bot.telegram.getFileLink(backupFileId);
       const response = await fetch(fileLink.href);
       const jsonText = await response.text();
       backupData = JSON.parse(jsonText);
+      
       const localBackupPath = path.join(DATA_DIR, `${backupData.backupId}.json`);
       fs.writeFileSync(localBackupPath, jsonText);
-    } else return null;
+    } else {
+      console.log('❌ No backup source provided');
+      return null;
+    }
     
-    if (!backupData) return null;
-    console.log(`📦 Restoring: ${backupData.backupId}`);
+    if (!backupData) {
+      console.log('❌ Failed to parse backup data');
+      return null;
+    }
     
+    console.log(`📦 Restoring backup: ${backupData.backupId}`);
+    console.log(`👥 Users: ${backupData.stats.totalUsers}`);
+    console.log(`💰 Earnings: ${backupData.stats.totalEarnings} TK`);
+    
+    // Safety backup of current data
+    const safetyBackup = path.join(DATA_DIR, `safety_${Date.now()}.json`);
+    const currentData = {
+      users, earnings, withdrawals, otpLog, admins, settings,
+      services, countries, activeNumbers, totpSecrets, tempMails,
+      countryPrices, numbersByCountryService
+    };
+    fs.writeFileSync(safetyBackup, JSON.stringify(currentData, null, 2));
+    console.log(`✅ Safety backup saved: ${safetyBackup}`);
+    
+    // Restore data
     if (backupData.data.users) { users = backupData.data.users; saveUsers(); }
     if (backupData.data.earnings) { earnings = backupData.data.earnings; saveEarnings(); }
     if (backupData.data.withdrawals) { withdrawals = backupData.data.withdrawals; saveWithdrawals(); }
@@ -1109,7 +1166,13 @@ async function restoreFromTelegramBackup(backupFileId, localPath = null) {
     if (backupData.data.countryPrices) { countryPrices = backupData.data.countryPrices; saveCountryPrices(); }
     if (backupData.data.numbersByCountryService) { numbersByCountryService = backupData.data.numbersByCountryService; saveNumbers(); }
     
-    const backupInfo = { backupId: backupData.backupId, timestamp: backupData.timestamp, stats: backupData.stats, localPath: path.join(DATA_DIR, `${backupData.backupId}.json`) };
+    // Update last backup info
+    const backupInfo = {
+      backupId: backupData.backupId,
+      timestamp: backupData.timestamp,
+      stats: backupData.stats,
+      localPath: path.join(DATA_DIR, `${backupData.backupId}.json`)
+    };
     fs.writeFileSync(path.join(DATA_DIR, "last_backup.json"), JSON.stringify(backupInfo, null, 2));
     
     console.log('✅ Restore successful!');
@@ -1127,13 +1190,16 @@ async function autoRestoreOnStart() {
   if (latestBackup) {
     console.log(`📦 Found backup: ${latestBackup.fileName}`);
     if (Object.keys(users).length === 0) {
-      console.log('⚠️ Current data empty! Restoring...');
-      await restoreFromTelegramBackup(latestBackup.fileId, latestBackup.localPath);
+      console.log('⚠️ Current data empty! Restoring from backup...');
+      const restored = await restoreFromTelegramBackup(latestBackup.fileId, latestBackup.localPath);
+      if (restored) {
+        console.log(`✅ Auto-restore successful! Restored ${restored.stats.totalUsers} users`);
+      }
     } else {
       console.log(`✅ Current data has ${Object.keys(users).length} users. No restore needed.`);
     }
   } else {
-    console.log('📭 No backup found');
+    console.log('📭 No backup found in group');
   }
 }
 
@@ -2166,8 +2232,9 @@ async function startBot() {
   try {
     console.log("=====================================");
     console.log("🚀 Starting Number Bot...");
-    console.log("✅ Backup system: UPDATED & FIXED");
+    console.log("✅ Backup system: FULLY FIXED");
     console.log("✅ Auto-restore: ENABLED");
+    console.log("✅ Backup Group ID: " + BACKUP_GROUP_ID);
     console.log("=====================================");
     await bot.launch({ allowedUpdates: ["message", "callback_query", "chat_member", "my_chat_member", "document"] });
     console.log("✅ Bot started!");
