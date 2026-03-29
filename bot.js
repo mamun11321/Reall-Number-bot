@@ -19,7 +19,7 @@ const CHAT_GROUP_ID = -1001153782407;
 const OTP_GROUP = "https://t.me/otpreceived1";
 const OTP_GROUP_ID = -1001153782407;
 
-// ব্যাকআপ গ্রুপ আইডি (আপনার দেওয়া নতুন আইডি)
+// ব্যাকআপ গ্রুপ আইডি
 const BACKUP_GROUP_ID = -1003732536424;
 const AUTO_RESTORE_ON_START = true;
 
@@ -1014,11 +1014,9 @@ async function createTelegramBackup(isAuto = true) {
     
     await bot.telegram.sendDocument(BACKUP_GROUP_ID, { source: buffer, filename: `${backupId}.json` }, { caption: message, parse_mode: 'Markdown' });
     
-    // লোকাল ফাইলেও সেভ করুন
     const localBackupPath = path.join(DATA_DIR, `${backupId}.json`);
     fs.writeFileSync(localBackupPath, jsonString);
     
-    // last backup info সেভ করুন
     const backupInfo = { backupId: backupId, timestamp: backupData.timestamp, stats: backupData.stats, localPath: localBackupPath };
     fs.writeFileSync(path.join(DATA_DIR, "last_backup.json"), JSON.stringify(backupInfo, null, 2));
     
@@ -1032,7 +1030,6 @@ async function createTelegramBackup(isAuto = true) {
 
 async function findLatestBackup() {
   try {
-    // 1. প্রথমে লোকাল ফাইল চেক করুন
     const lastBackupFile = path.join(DATA_DIR, "last_backup.json");
     if (fs.existsSync(lastBackupFile)) {
       try {
@@ -1045,7 +1042,6 @@ async function findLatestBackup() {
       } catch(e) {}
     }
     
-    // 2. Telegram থেকে খুঁজুন
     console.log('🔍 Searching Telegram for backups...');
     let latestBackup = null;
     let latestTimestamp = null;
@@ -1076,7 +1072,6 @@ async function findLatestBackup() {
       console.error('Error fetching messages:', error.message);
     }
     
-    // 3. পাওয়া গেলে লোকাল কপি সেভ করুন
     if (latestBackup) {
       try {
         const fileLink = await bot.telegram.getFileLink(latestBackup.fileId);
@@ -1141,7 +1136,6 @@ async function restoreFromTelegramBackup(backupFileId, localPath = null) {
     console.log(`👥 Users: ${backupData.stats.totalUsers}`);
     console.log(`💰 Earnings: ${backupData.stats.totalEarnings} TK`);
     
-    // Safety backup of current data
     const safetyBackup = path.join(DATA_DIR, `safety_${Date.now()}.json`);
     const currentData = {
       users, earnings, withdrawals, otpLog, admins, settings,
@@ -1151,7 +1145,6 @@ async function restoreFromTelegramBackup(backupFileId, localPath = null) {
     fs.writeFileSync(safetyBackup, JSON.stringify(currentData, null, 2));
     console.log(`✅ Safety backup saved: ${safetyBackup}`);
     
-    // Restore data
     if (backupData.data.users) { users = backupData.data.users; saveUsers(); }
     if (backupData.data.earnings) { earnings = backupData.data.earnings; saveEarnings(); }
     if (backupData.data.withdrawals) { withdrawals = backupData.data.withdrawals; saveWithdrawals(); }
@@ -1166,7 +1159,6 @@ async function restoreFromTelegramBackup(backupFileId, localPath = null) {
     if (backupData.data.countryPrices) { countryPrices = backupData.data.countryPrices; saveCountryPrices(); }
     if (backupData.data.numbersByCountryService) { numbersByCountryService = backupData.data.numbersByCountryService; saveNumbers(); }
     
-    // Update last backup info
     const backupInfo = {
       backupId: backupData.backupId,
       timestamp: backupData.timestamp,
@@ -1688,7 +1680,16 @@ bot.command("adminlogin", async (ctx) => {
 /******************** ADMIN PANEL ********************/
 bot.command("admin", async (ctx) => {
   if (!ctx.session.isAdmin && !isAdmin(ctx.from.id.toString())) return await ctx.reply("❌ *Admin Access Required*", { parse_mode: "Markdown" });
-  const buttons = [[{ text: "📊 Stock Report", callback_data: "admin_stock" }, { text: "👥 User Stats", callback_data: "admin_users" }], [{ text: "📢 Broadcast", callback_data: "admin_broadcast" }, { text: "📋 OTP Log", callback_data: "admin_otp_log" }], [{ text: "➕ Add Numbers", callback_data: "admin_add_numbers" }, { text: "📤 Upload File", callback_data: "admin_upload" }], [{ text: "🗑️ Delete Numbers", callback_data: "admin_delete" }, { text: "🔧 Manage Services", callback_data: "admin_manage_services" }], [{ text: "🌍 Manage Countries", callback_data: "admin_manage_countries" }, { text: "⚙️ Settings", callback_data: "admin_settings" }], [{ text: "💰 Country Prices", callback_data: "admin_country_prices" }, { text: "💸 Withdrawals", callback_data: "admin_withdrawals" }], [{ text: "👛 Balance Management", callback_data: "admin_balance_manage" }, { text: "📦 Backup", callback_data: "admin_backup" }], [{ text: "🚪 Logout", callback_data: "admin_logout" }]];
+  const buttons = [
+    [{ text: "📊 Stock Report", callback_data: "admin_stock" }, { text: "👥 User Stats", callback_data: "admin_users" }],
+    [{ text: "📢 Broadcast", callback_data: "admin_broadcast" }, { text: "📋 OTP Log", callback_data: "admin_otp_log" }],
+    [{ text: "➕ Add Numbers", callback_data: "admin_add_numbers" }, { text: "📤 Upload File", callback_data: "admin_upload" }],
+    [{ text: "🗑️ Delete Numbers", callback_data: "admin_delete" }, { text: "🔧 Manage Services", callback_data: "admin_manage_services" }],
+    [{ text: "🌍 Manage Countries", callback_data: "admin_manage_countries" }, { text: "⚙️ Settings", callback_data: "admin_settings" }],
+    [{ text: "💰 Country Prices", callback_data: "admin_country_prices" }, { text: "💸 Withdrawals", callback_data: "admin_withdrawals" }],
+    [{ text: "👛 Balance Management", callback_data: "admin_balance_manage" }, { text: "📦 Backup", callback_data: "admin_backup" }],
+    [{ text: "🚪 Logout", callback_data: "admin_logout" }]
+  ];
   await ctx.reply("🛠 *Admin Dashboard*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: buttons } });
 });
 
@@ -1757,7 +1758,16 @@ bot.action("admin_back", async (ctx) => {
   await ctx.answerCbQuery();
   ctx.session.adminState = null;
   ctx.session.adminData = null;
-  const buttons = [[{ text: "📊 Stock Report", callback_data: "admin_stock" }, { text: "👥 User Stats", callback_data: "admin_users" }], [{ text: "📢 Broadcast", callback_data: "admin_broadcast" }, { text: "📋 OTP Log", callback_data: "admin_otp_log" }], [{ text: "➕ Add Numbers", callback_data: "admin_add_numbers" }, { text: "📤 Upload File", callback_data: "admin_upload" }], [{ text: "🗑️ Delete Numbers", callback_data: "admin_delete" }, { text: "🔧 Manage Services", callback_data: "admin_manage_services" }], [{ text: "🌍 Manage Countries", callback_data: "admin_manage_countries" }, { text: "⚙️ Settings", callback_data: "admin_settings" }], [{ text: "💰 Country Prices", callback_data: "admin_country_prices" }, { text: "💸 Withdrawals", callback_data: "admin_withdrawals" }], [{ text: "👛 Balance Management", callback_data: "admin_balance_manage" }, { text: "📦 Backup", callback_data: "admin_backup" }], [{ text: "🚪 Logout", callback_data: "admin_logout" }]];
+  const buttons = [
+    [{ text: "📊 Stock Report", callback_data: "admin_stock" }, { text: "👥 User Stats", callback_data: "admin_users" }],
+    [{ text: "📢 Broadcast", callback_data: "admin_broadcast" }, { text: "📋 OTP Log", callback_data: "admin_otp_log" }],
+    [{ text: "➕ Add Numbers", callback_data: "admin_add_numbers" }, { text: "📤 Upload File", callback_data: "admin_upload" }],
+    [{ text: "🗑️ Delete Numbers", callback_data: "admin_delete" }, { text: "🔧 Manage Services", callback_data: "admin_manage_services" }],
+    [{ text: "🌍 Manage Countries", callback_data: "admin_manage_countries" }, { text: "⚙️ Settings", callback_data: "admin_settings" }],
+    [{ text: "💰 Country Prices", callback_data: "admin_country_prices" }, { text: "💸 Withdrawals", callback_data: "admin_withdrawals" }],
+    [{ text: "👛 Balance Management", callback_data: "admin_balance_manage" }, { text: "📦 Backup", callback_data: "admin_backup" }],
+    [{ text: "🚪 Logout", callback_data: "admin_logout" }]
+  ];
   await ctx.editMessageText("🛠 *Admin Dashboard*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: buttons } });
 });
 
