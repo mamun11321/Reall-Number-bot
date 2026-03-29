@@ -6,7 +6,7 @@ const https = require("https");
 const { authenticator } = require("otplib");
 
 /******************** YOUR CONFIGURATION ********************/
-const BOT_TOKEN = "8657128372:";
+const BOT_TOKEN = "8657128372:AAFArlAPVAaCEnriPz_3Wn3xc1EQUjldLH8";
 const ADMIN_PASSWORD = "mamun1132";
 
 // ⚠️ IMPORTANT: Replace the IDs below with your actual IDs ⚠️
@@ -621,7 +621,7 @@ function generateTOTP(secret) {
   } catch (e) { return null; }
 }
 
-/******************** VERIFICATION FUNCTION ********************/
+/******************** VERIFICATION FUNCTION - FIXED ********************/
 async function checkUserMembership(ctx) {
   try {
     const userId = ctx.from.id;
@@ -742,7 +742,7 @@ bot.use((ctx, next) => {
   return next();
 });
 
-/******************** VERIFICATION MIDDLEWARE ********************/
+/******************** VERIFICATION MIDDLEWARE - FIXED ********************/
 bot.use(async (ctx, next) => {
   if (ctx.chat?.type !== 'private') return next();
   if (ctx.session?.isAdmin) return next();
@@ -910,7 +910,7 @@ bot.start(async (ctx) => {
   }
 });
 
-/******************** VERIFICATION BUTTON ********************/
+/******************** VERIFICATION BUTTON - FIXED ********************/
 bot.action("verify_user", async (ctx) => {
   try {
     await ctx.answerCbQuery("🔍 Checking all 3 groups...");
@@ -971,233 +971,13 @@ bot.action("verify_user", async (ctx) => {
   }
 });
 
-/******************** TELEGRAM BACKUP SYSTEM - FULLY FIXED ********************/
-let lastBackupInfo = null;
-
-async function createTelegramBackup(isAuto = true) {
-  try {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupId = `BACKUP_${timestamp}`;
-    
-    const backupData = {
-      backupId: backupId,
-      timestamp: new Date().toISOString(),
-      version: "1.0",
-      data: {
-        users: users,
-        earnings: earnings,
-        withdrawals: withdrawals,
-        otpLog: otpLog.slice(-500),
-        admins: admins,
-        settings: settings,
-        services: services,
-        countries: countries,
-        activeNumbers: activeNumbers,
-        totpSecrets: totpSecrets,
-        tempMails: tempMails,
-        countryPrices: countryPrices,
-        numbersByCountryService: numbersByCountryService
-      },
-      stats: {
-        totalUsers: Object.keys(users).length,
-        totalEarnings: Object.values(earnings).reduce((sum, e) => sum + e.totalEarned, 0),
-        totalBalance: Object.values(earnings).reduce((sum, e) => sum + e.balance, 0),
-        totalWithdrawals: withdrawals.length,
-        totalNumbers: Object.values(numbersByCountryService).flatMap(c => Object.values(c).flat().length).length
-      }
-    };
-    
-    const jsonString = JSON.stringify(backupData, null, 2);
-    const buffer = Buffer.from(jsonString, 'utf-8');
-    
-    let message = `📦 *SYSTEM BACKUP*\n\n🆔 ID: \`${backupId}\`\n📅 Time: ${new Date().toLocaleString('en-GB')}\n\n📊 *Statistics:*\n👥 Users: ${backupData.stats.totalUsers}\n💰 Total Earned: ${backupData.stats.totalEarnings.toFixed(2)} TK\n💵 Balance: ${backupData.stats.totalBalance.toFixed(2)} TK\n📞 Numbers: ${backupData.stats.totalNumbers}\n📁 Size: ${(buffer.length / 1024).toFixed(2)} KB`;
-    
-    await bot.telegram.sendDocument(BACKUP_GROUP_ID, { source: buffer, filename: `${backupId}.json` }, { caption: message, parse_mode: 'Markdown' });
-    
-    const localBackupPath = path.join(DATA_DIR, `${backupId}.json`);
-    fs.writeFileSync(localBackupPath, jsonString);
-    
-    const backupInfo = { backupId: backupId, timestamp: backupData.timestamp, stats: backupData.stats, localPath: localBackupPath };
-    fs.writeFileSync(path.join(DATA_DIR, "last_backup.json"), JSON.stringify(backupInfo, null, 2));
-    
-    console.log(`✅ Backup created: ${backupId}`);
-    return backupData;
-  } catch (error) {
-    console.error('Backup error:', error);
-    return null;
-  }
-}
-
-async function findLatestBackup() {
-  try {
-    const lastBackupFile = path.join(DATA_DIR, "last_backup.json");
-    if (fs.existsSync(lastBackupFile)) {
-      try {
-        const info = JSON.parse(fs.readFileSync(lastBackupFile, 'utf8'));
-        const localFile = path.join(DATA_DIR, `${info.backupId}.json`);
-        if (fs.existsSync(localFile)) {
-          console.log(`📦 Found local backup: ${info.backupId}`);
-          return { fileId: null, fileName: `${info.backupId}.json`, timestamp: info.timestamp, localPath: localFile, stats: info.stats };
-        }
-      } catch(e) {}
-    }
-    
-    console.log('🔍 Searching Telegram for backups...');
-    let latestBackup = null;
-    let latestTimestamp = null;
-    
-    try {
-      const messages = await bot.telegram.getChatHistory(BACKUP_GROUP_ID, 100);
-      
-      for (const msg of messages) {
-        if (msg.document && msg.document.file_name && msg.document.file_name.endsWith('.json')) {
-          const match = msg.document.file_name.match(/BACKUP_([\d\-T]+)\.json/);
-          if (match) {
-            const timestamp = match[1];
-            if (!latestTimestamp || timestamp > latestTimestamp) {
-              latestTimestamp = timestamp;
-              latestBackup = {
-                messageId: msg.message_id,
-                fileId: msg.document.file_id,
-                fileName: msg.document.file_name,
-                timestamp: timestamp,
-                fileSize: msg.document.file_size
-              };
-              console.log(`📦 Found backup: ${latestBackup.fileName}`);
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching messages:', error.message);
-    }
-    
-    if (latestBackup) {
-      try {
-        const fileLink = await bot.telegram.getFileLink(latestBackup.fileId);
-        const response = await fetch(fileLink.href);
-        const jsonText = await response.text();
-        const backupData = JSON.parse(jsonText);
-        
-        const localBackupPath = path.join(DATA_DIR, latestBackup.fileName);
-        fs.writeFileSync(localBackupPath, jsonText);
-        
-        const backupInfo = {
-          backupId: latestBackup.fileName.replace('.json', ''),
-          timestamp: latestBackup.timestamp,
-          stats: backupData.stats,
-          localPath: localBackupPath
-        };
-        fs.writeFileSync(path.join(DATA_DIR, "last_backup.json"), JSON.stringify(backupInfo, null, 2));
-        
-        latestBackup.localPath = localBackupPath;
-        latestBackup.stats = backupData.stats;
-        
-      } catch(e) {
-        console.error('Failed to download backup:', e.message);
-      }
-    }
-    
-    return latestBackup;
-  } catch (error) {
-    console.error('Find latest backup error:', error);
-    return null;
-  }
-}
-
-async function restoreFromTelegramBackup(backupFileId, localPath = null) {
-  try {
-    let backupData = null;
-    
-    if (localPath && fs.existsSync(localPath)) {
-      console.log('🔄 Restoring from local backup...');
-      const jsonText = fs.readFileSync(localPath, 'utf8');
-      backupData = JSON.parse(jsonText);
-    } else if (backupFileId) {
-      console.log('🔄 Downloading from Telegram...');
-      const fileLink = await bot.telegram.getFileLink(backupFileId);
-      const response = await fetch(fileLink.href);
-      const jsonText = await response.text();
-      backupData = JSON.parse(jsonText);
-      
-      const localBackupPath = path.join(DATA_DIR, `${backupData.backupId}.json`);
-      fs.writeFileSync(localBackupPath, jsonText);
-    } else {
-      console.log('❌ No backup source provided');
-      return null;
-    }
-    
-    if (!backupData) {
-      console.log('❌ Failed to parse backup data');
-      return null;
-    }
-    
-    console.log(`📦 Restoring backup: ${backupData.backupId}`);
-    console.log(`👥 Users: ${backupData.stats.totalUsers}`);
-    console.log(`💰 Earnings: ${backupData.stats.totalEarnings} TK`);
-    
-    const safetyBackup = path.join(DATA_DIR, `safety_${Date.now()}.json`);
-    const currentData = {
-      users, earnings, withdrawals, otpLog, admins, settings,
-      services, countries, activeNumbers, totpSecrets, tempMails,
-      countryPrices, numbersByCountryService
-    };
-    fs.writeFileSync(safetyBackup, JSON.stringify(currentData, null, 2));
-    console.log(`✅ Safety backup saved: ${safetyBackup}`);
-    
-    if (backupData.data.users) { users = backupData.data.users; saveUsers(); }
-    if (backupData.data.earnings) { earnings = backupData.data.earnings; saveEarnings(); }
-    if (backupData.data.withdrawals) { withdrawals = backupData.data.withdrawals; saveWithdrawals(); }
-    if (backupData.data.otpLog) { otpLog = backupData.data.otpLog; saveOTPLog(); }
-    if (backupData.data.admins) { admins = backupData.data.admins; saveAdmins(); }
-    if (backupData.data.settings) { settings = backupData.data.settings; saveSettings(); }
-    if (backupData.data.services) { services = backupData.data.services; saveServices(); }
-    if (backupData.data.countries) { countries = backupData.data.countries; saveCountries(); }
-    if (backupData.data.activeNumbers) { activeNumbers = backupData.data.activeNumbers; saveActiveNumbers(); }
-    if (backupData.data.totpSecrets) { totpSecrets = backupData.data.totpSecrets; saveTotpSecrets(); }
-    if (backupData.data.tempMails) { tempMails = backupData.data.tempMails; saveTempMails(); }
-    if (backupData.data.countryPrices) { countryPrices = backupData.data.countryPrices; saveCountryPrices(); }
-    if (backupData.data.numbersByCountryService) { numbersByCountryService = backupData.data.numbersByCountryService; saveNumbers(); }
-    
-    const backupInfo = {
-      backupId: backupData.backupId,
-      timestamp: backupData.timestamp,
-      stats: backupData.stats,
-      localPath: path.join(DATA_DIR, `${backupData.backupId}.json`)
-    };
-    fs.writeFileSync(path.join(DATA_DIR, "last_backup.json"), JSON.stringify(backupInfo, null, 2));
-    
-    console.log('✅ Restore successful!');
-    return backupData;
-  } catch (error) {
-    console.error('Restore error:', error);
-    return null;
-  }
-}
-
-async function autoRestoreOnStart() {
-  if (!AUTO_RESTORE_ON_START) return;
-  console.log('🔍 Checking for latest backup...');
-  const latestBackup = await findLatestBackup();
-  if (latestBackup) {
-    console.log(`📦 Found backup: ${latestBackup.fileName}`);
-    if (Object.keys(users).length === 0) {
-      console.log('⚠️ Current data empty! Restoring from backup...');
-      const restored = await restoreFromTelegramBackup(latestBackup.fileId, latestBackup.localPath);
-      if (restored) {
-        console.log(`✅ Auto-restore successful! Restored ${restored.stats.totalUsers} users`);
-      }
-    } else {
-      console.log(`✅ Current data has ${Object.keys(users).length} users. No restore needed.`);
-    }
-  } else {
-    console.log('📭 No backup found in group');
-  }
-}
+/******************** TELEGRAM BACKUP SYSTEM ********************/
 
 /******************** BACKUP COMMANDS ********************/
 bot.command("backup", async (ctx) => {
-  if (!ctx.session.isAdmin && !isAdmin(ctx.from.id.toString())) return await ctx.reply("❌ Admin only");
+  if (!ctx.session.isAdmin && !isAdmin(ctx.from.id.toString())) {
+    return await ctx.reply("❌ Admin only");
+  }
   await ctx.reply("⏳ *Creating backup...*", { parse_mode: "Markdown" });
   const result = await createTelegramBackup(false);
   if (result) {
@@ -1208,22 +988,45 @@ bot.command("backup", async (ctx) => {
 });
 
 bot.command("emergency_restore", async (ctx) => {
-  if (!ctx.session.isAdmin && !isAdmin(ctx.from.id.toString())) return await ctx.reply("❌ Admin only");
+  if (!ctx.session.isAdmin && !isAdmin(ctx.from.id.toString())) {
+    return await ctx.reply("❌ Admin only");
+  }
   await ctx.reply("🔍 *Searching for latest backup...*", { parse_mode: "Markdown" });
   const latestBackup = await findLatestBackup();
-  if (!latestBackup) return await ctx.reply("❌ *No backup found*", { parse_mode: "Markdown" });
+  if (!latestBackup) {
+    return await ctx.reply("❌ *No backup found*", { parse_mode: "Markdown" });
+  }
   const backupDate = new Date(latestBackup.timestamp.replace(/-/g, ':')).toLocaleString('en-GB');
-  await ctx.reply(`📦 *Backup Found*\n\n📁 File: ${latestBackup.fileName}\n📅 Date: ${backupDate}\n\n⚠️ *WARNING:* This will overwrite current data!\nType /confirm_restore to proceed.`, { parse_mode: "Markdown" });
-  ctx.session.pendingRestore = { fileId: latestBackup.fileId, localPath: latestBackup.localPath };
+  await ctx.reply(
+    `📦 *Backup Found*\n\n` +
+    `📁 File: ${latestBackup.fileName}\n` +
+    `📅 Date: ${backupDate}\n\n` +
+    `⚠️ *WARNING:* This will overwrite current data!\n` +
+    `Type /confirm_restore to proceed.\n` +
+    `Type /cancel to abort.`,
+    { parse_mode: "Markdown" }
+  );
+  ctx.session.pendingRestore = latestBackup.fileId;
 });
 
 bot.command("confirm_restore", async (ctx) => {
-  if (!ctx.session.isAdmin && !isAdmin(ctx.from.id.toString())) return await ctx.reply("❌ Admin only");
-  if (!ctx.session.pendingRestore) return await ctx.reply("❌ No pending restore. Use /emergency_restore first.");
+  if (!ctx.session.isAdmin && !isAdmin(ctx.from.id.toString())) {
+    return await ctx.reply("❌ Admin only");
+  }
+  if (!ctx.session.pendingRestore) {
+    return await ctx.reply("❌ No pending restore. Use /emergency_restore first.");
+  }
   await ctx.reply("⏳ *Restoring from backup...*", { parse_mode: "Markdown" });
-  const restored = await restoreFromTelegramBackup(ctx.session.pendingRestore.fileId, ctx.session.pendingRestore.localPath);
+  const restored = await restoreFromTelegramBackup(ctx.session.pendingRestore);
   if (restored) {
-    await ctx.reply(`✅ *RESTORE SUCCESSFUL!*\n\n📦 Backup: ${restored.backupId}\n👥 Users: ${restored.stats.totalUsers}\n💰 Total Earned: ${restored.stats.totalEarnings.toFixed(2)} TK`, { parse_mode: "Markdown" });
+    await ctx.reply(
+      `✅ *RESTORE SUCCESSFUL!*\n\n` +
+      `📦 Backup: ${restored.backupId}\n` +
+      `👥 Users: ${restored.stats.totalUsers}\n` +
+      `💰 Total Earned: ${restored.stats.totalEarnings.toFixed(2)} TK\n` +
+      `💵 Pending Balance: ${restored.stats.totalBalance.toFixed(2)} TK`,
+      { parse_mode: "Markdown" }
+    );
   } else {
     await ctx.reply("❌ *Restore failed*", { parse_mode: "Markdown" });
   }
@@ -1231,28 +1034,45 @@ bot.command("confirm_restore", async (ctx) => {
 });
 
 bot.command("backup_list_telegram", async (ctx) => {
-  if (!ctx.session.isAdmin && !isAdmin(ctx.from.id.toString())) return await ctx.reply("❌ Admin only");
+  if (!ctx.session.isAdmin && !isAdmin(ctx.from.id.toString())) {
+    return await ctx.reply("❌ Admin only");
+  }
   await ctx.reply("🔍 *Fetching backup list...*", { parse_mode: "Markdown" });
+  
   try {
     const messages = await bot.telegram.getChatHistory(BACKUP_GROUP_ID, 50);
     const backups = [];
+    
     for (const msg of messages) {
       if (msg.document && msg.document.file_name && msg.document.file_name.endsWith('.json')) {
         const match = msg.document.file_name.match(/BACKUP_([\d\-T]+)\.json/);
         if (match) {
-          backups.push({ name: msg.document.file_name, date: match[1], size: (msg.document.file_size / 1024).toFixed(2) });
+          backups.push({
+            name: msg.document.file_name,
+            date: match[1],
+            size: (msg.document.file_size / 1024).toFixed(2)
+          });
         }
       }
     }
-    if (backups.length === 0) return await ctx.reply("📭 *No backups found*", { parse_mode: "Markdown" });
+    
+    if (backups.length === 0) {
+      return await ctx.reply("📭 *No backups found*", { parse_mode: "Markdown" });
+    }
+    
     let message = "📦 *Telegram Backups*\n\n";
     backups.slice(0, 10).forEach((b, i) => {
       const date = new Date(b.date.replace(/-/g, ':')).toLocaleString('en-GB');
-      message += `${i+1}. ${b.name}\n   📅 ${date} | 💾 ${b.size} KB\n\n`;
+      message += `${i+1}. ${b.name}\n`;
+      message += `   📅 ${date} | 💾 ${b.size} KB\n\n`;
     });
+    
     message += `\n💡 Use /emergency_restore to restore latest backup`;
+    
     await ctx.reply(message, { parse_mode: "Markdown" });
+    
   } catch (error) {
+    console.error('Backup list error:', error);
     await ctx.reply("❌ Error fetching backup list. Make sure bot is admin in backup group.");
   }
 });
@@ -1298,15 +1118,41 @@ bot.hears(["📞 Get Numbers", "☎️ Get Number"], async (ctx) => {
       availableServices.push({ serviceId, service, totalNums });
     }
   }
-  if (availableServices.length === 0) return await ctx.reply("📭 *No Numbers Available*", { parse_mode: "Markdown" });
+
+  if (availableServices.length === 0) {
+    return await ctx.reply(
+      "📭 *No Numbers Available*\n\n" +
+      "Sorry, all numbers are currently in use.\n" +
+      "Please try again later or contact support.",
+      { parse_mode: "Markdown" }
+    );
+  }
+
   const serviceButtons = [];
   for (let i = 0; i < availableServices.length; i += 2) {
     const row = [];
-    row.push({ text: `${availableServices[i].service.icon} ${availableServices[i].service.name} (${availableServices[i].totalNums})`, callback_data: `select_service:${availableServices[i].serviceId}` });
-    if (availableServices[i + 1]) row.push({ text: `${availableServices[i+1].service.icon} ${availableServices[i+1].service.name} (${availableServices[i+1].totalNums})`, callback_data: `select_service:${availableServices[i+1].serviceId}` });
+    row.push({
+      text: `${availableServices[i].service.icon} ${availableServices[i].service.name} (${availableServices[i].totalNums})`,
+      callback_data: `select_service:${availableServices[i].serviceId}`
+    });
+    if (availableServices[i + 1]) {
+      row.push({
+        text: `${availableServices[i+1].service.icon} ${availableServices[i+1].service.name} (${availableServices[i+1].totalNums})`,
+        callback_data: `select_service:${availableServices[i+1].serviceId}`
+      });
+    }
     serviceButtons.push(row);
   }
-  await ctx.reply("🎯 *Select a Service*\n\nWhich service do you need a number for?\n_(number in brackets = available count)_", { parse_mode: "Markdown", reply_markup: { inline_keyboard: serviceButtons } });
+
+  await ctx.reply(
+    "🎯 *Select a Service*\n\n" +
+    "Which service do you need a number for?\n" +
+    "_(number in brackets = available count)_",
+    {
+      parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: serviceButtons }
+    }
+  );
 });
 
 /******************** SERVICE SELECTION ********************/
@@ -1315,27 +1161,55 @@ bot.action(/^select_service:(.+)$/, async (ctx) => {
     await ctx.answerCbQuery();
     const serviceId = ctx.match[1];
     const availableCountries = getAvailableCountriesForService(serviceId);
-    if (availableCountries.length === 0) return await ctx.answerCbQuery("❌ No numbers available", { show_alert: true });
+
+    if (availableCountries.length === 0) {
+      return await ctx.answerCbQuery("❌ No numbers available for this service", { show_alert: true });
+    }
+
     const service = services[serviceId];
-    const sortedCountries = [...availableCountries].sort((a, b) => getOtpPriceForCountry(a) - getOtpPriceForCountry(b));
+
+    const sortedCountries = [...availableCountries].sort((a, b) =>
+      getOtpPriceForCountry(a) - getOtpPriceForCountry(b)
+    );
+
     const countryButtons = [];
     for (let i = 0; i < sortedCountries.length; i += 2) {
       const row = [];
       const cc1 = sortedCountries[i];
       const c1 = countries[cc1];
       const price1 = getOtpPriceForCountry(cc1);
-      row.push({ text: `${c1.flag} ${c1.name} (${price1.toFixed(2)}TK)`, callback_data: `select_country:${serviceId}:${cc1}` });
+      row.push({
+        text: `${c1.flag} ${c1.name} (${price1.toFixed(2)}TK)`,
+        callback_data: `select_country:${serviceId}:${cc1}`
+      });
       if (sortedCountries[i + 1]) {
         const cc2 = sortedCountries[i + 1];
         const c2 = countries[cc2];
         const price2 = getOtpPriceForCountry(cc2);
-        row.push({ text: `${c2.flag} ${c2.name} (${price2.toFixed(2)}TK)`, callback_data: `select_country:${serviceId}:${cc2}` });
+        row.push({
+          text: `${c2.flag} ${c2.name} (${price2.toFixed(2)}TK)`,
+          callback_data: `select_country:${serviceId}:${cc2}`
+        });
       }
       countryButtons.push(row);
     }
-    countryButtons.push([{ text: "🔙 Back", callback_data: "back_to_services" }]);
-    await ctx.editMessageText(`${service.icon} *${service.name}* — Select Country\n\n📌 Balance will be added automatically when OTP arrives`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: countryButtons } });
-  } catch (error) { console.error("Service selection error:", error); await ctx.answerCbQuery("❌ Error", { show_alert: true }); }
+
+    countryButtons.push([{ text: "🔙 Back to Service List", callback_data: "back_to_services" }]);
+
+    await ctx.editMessageText(
+      `${service.icon} *${service.name}* — Select Country\n\n` +
+      `📌 Balance will be added automatically when OTP arrives\n` +
+      `_(taka = earnings per OTP)_`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: { inline_keyboard: countryButtons }
+      }
+    );
+
+  } catch (error) {
+    console.error("Service selection error:", error);
+    await ctx.answerCbQuery("❌ Error", { show_alert: true });
+  }
 });
 
 /******************** COUNTRY SELECTION ********************/
@@ -1346,29 +1220,75 @@ bot.action(/^select_country:(.+):(.+)$/, async (ctx) => {
     const countryCode = ctx.match[2];
     const userId = ctx.from.id.toString();
     const numberCount = settings.defaultNumberCount;
+
     const now = Date.now();
-    if ((now - ctx.session.lastNumberTime) < (settings.cooldownSeconds * 1000) && (ctx.session.currentNumbers || []).length > 0) {
-      const remaining = Math.ceil(((settings.cooldownSeconds * 1000) - (now - ctx.session.lastNumberTime)) / 1000);
+    const timeSinceLast = now - ctx.session.lastNumberTime;
+    const cooldown = settings.cooldownSeconds * 1000;
+
+    if (timeSinceLast < cooldown && (ctx.session.currentNumbers || []).length > 0) {
+      const remaining = Math.ceil((cooldown - timeSinceLast) / 1000);
+      await ctx.answerCbQuery();
       return await ctx.reply(`⏳ *${remaining} সেকেন্ড অপেক্ষা করুন।*`, { parse_mode: "Markdown" });
     }
+
     const numbers = getMultipleNumbersByCountryAndService(countryCode, serviceId, userId, numberCount);
-    if (numbers.length === 0) return await ctx.answerCbQuery(`❌ Not enough numbers.`, { show_alert: true });
+
+    if (numbers.length === 0) {
+      return await ctx.answerCbQuery(`❌ Not enough numbers available.`, { show_alert: true });
+    }
+
     if ((ctx.session.currentNumbers || []).length > 0) {
-      (ctx.session.currentNumbers || []).forEach(num => { if (activeNumbers[num]) delete activeNumbers[num]; });
+      (ctx.session.currentNumbers || []).forEach(num => {
+        if (activeNumbers[num]) {
+          delete activeNumbers[num];
+        }
+      });
       saveActiveNumbers();
     }
+
     ctx.session.currentNumbers = numbers;
     ctx.session.currentService = serviceId;
     ctx.session.currentCountry = countryCode;
     ctx.session.lastNumberTime = now;
+
     const country = countries[countryCode];
     const service = services[serviceId];
     const otpPrice = getOtpPriceForCountry(countryCode);
+
     let numbersText = '';
-    numbers.forEach((num, i) => { numbersText += `${i + 1}. \`+${num}\`\n`; });
-    const message = `✅ *${numbers.length} Number(s) Assigned!*\n\n${service.icon} *Service:* ${service.name}\n${country.flag} *Country:* ${country.name}\n💵 *Earnings per OTP:* ${otpPrice.toFixed(2)} taka\n\n📞 *Numbers:*\n${numbersText}\n📌 Use this number in the OTP Group.`;
-    await ctx.editMessageText(message, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '📨 Open OTP Group', url: OTP_GROUP }], [{ text: '🔄 Get New Numbers', callback_data: `get_new_numbers:${serviceId}:${countryCode}` }], [{ text: '🔙 Service List', callback_data: 'back_to_services' }]] } });
-  } catch (error) { console.error("Country selection error:", error); await ctx.answerCbQuery("❌ Error", { show_alert: true }); }
+    numbers.forEach((num, i) => {
+      numbersText += `${i + 1}. \`+${num}\`\n`;
+    });
+
+    const message =
+      `✅ *${numbers.length} Number(s) Assigned!*\n\n` +
+      `${service.icon} *Service:* ${service.name}\n` +
+      `${country.flag} *Country:* ${country.name}\n` +
+      `💵 *Earnings per OTP:* ${otpPrice.toFixed(2)} taka\n\n` +
+      `📞 *Numbers:*\n${numbersText}\n` +
+      `📌 Use this number in the OTP Group.\n` +
+      `OTP will appear here and balance will be updated automatically.`;
+
+    const sentMessage = await ctx.editMessageText(message, {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📨 Open OTP Group', url: OTP_GROUP }],
+          [{ text: '🔄 Get New Numbers', callback_data: `get_new_numbers:${serviceId}:${countryCode}` }],
+          [{ text: '🔙 Service List', callback_data: 'back_to_services' }]
+        ]
+      }
+    });
+
+    if (sentMessage && sentMessage.message_id) {
+      ctx.session.lastMessageId = sentMessage.message_id;
+      ctx.session.lastChatId = ctx.chat.id;
+    }
+
+  } catch (error) {
+    console.error("Country selection error:", error);
+    await ctx.answerCbQuery("❌ Error getting numbers", { show_alert: true });
+  }
 });
 
 /******************** GET NEW NUMBERS ********************/
@@ -1379,27 +1299,68 @@ bot.action(/^get_new_numbers:(.+):(.+)$/, async (ctx) => {
     const countryCode = ctx.match[2];
     const userId = ctx.from.id.toString();
     const numberCount = settings.defaultNumberCount;
+
     const now = Date.now();
-    if ((now - ctx.session.lastNumberTime) < (settings.cooldownSeconds * 1000)) {
-      const remaining = Math.ceil(((settings.cooldownSeconds * 1000) - (now - ctx.session.lastNumberTime)) / 1000);
+    const timeSinceLast = now - ctx.session.lastNumberTime;
+    const cooldown = settings.cooldownSeconds * 1000;
+
+    if (timeSinceLast < cooldown) {
+      const remaining = Math.ceil((cooldown - timeSinceLast) / 1000);
+      await ctx.answerCbQuery();
       return await ctx.reply(`⏳ *${remaining} সেকেন্ড অপেক্ষা করুন।*`, { parse_mode: "Markdown" });
     }
+
     const numbers = getMultipleNumbersByCountryAndService(countryCode, serviceId, userId, numberCount);
-    if (numbers.length === 0) return await ctx.answerCbQuery(`❌ Not enough numbers.`, { show_alert: true });
+
+    if (numbers.length === 0) {
+      return await ctx.answerCbQuery(`❌ Not enough numbers available.`, { show_alert: true });
+    }
+
     if ((ctx.session.currentNumbers || []).length > 0) {
-      (ctx.session.currentNumbers || []).forEach(num => { if (activeNumbers[num]) delete activeNumbers[num]; });
+      (ctx.session.currentNumbers || []).forEach(num => {
+        if (activeNumbers[num]) {
+          delete activeNumbers[num];
+        }
+      });
       saveActiveNumbers();
     }
+
     ctx.session.currentNumbers = numbers;
     ctx.session.lastNumberTime = now;
+
     const country = countries[countryCode];
     const service = services[serviceId];
     const otpPrice = getOtpPriceForCountry(countryCode);
+
     let numbersText = '';
-    numbers.forEach((num, i) => { numbersText += `${i + 1}. \`+${num}\`\n`; });
-    const message = `🔄 *${numbers.length} New Number(s)!*\n\n${service.icon} *Service:* ${service.name}\n${country.flag} *Country:* ${country.name}\n💵 *Earnings per OTP:* ${otpPrice.toFixed(2)} taka\n\n📞 *Numbers:*\n${numbersText}\n📌 Use this number in the OTP Group.`;
-    await ctx.editMessageText(message, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '📨 Open OTP Group', url: OTP_GROUP }], [{ text: '🔄 Get New Numbers', callback_data: `get_new_numbers:${serviceId}:${countryCode}` }], [{ text: '🔙 Service List', callback_data: 'back_to_services' }]] } });
-  } catch (error) { console.error("Get new numbers error:", error); await ctx.answerCbQuery("❌ Error", { show_alert: true }); }
+    numbers.forEach((num, i) => {
+      numbersText += `${i + 1}. \`+${num}\`\n`;
+    });
+
+    const message =
+      `🔄 *${numbers.length} New Number(s)!*\n\n` +
+      `${service.icon} *Service:* ${service.name}\n` +
+      `${country.flag} *Country:* ${country.name}\n` +
+      `💵 *Earnings per OTP:* ${otpPrice.toFixed(2)} taka\n\n` +
+      `📞 *Numbers:*\n${numbersText}\n` +
+      `📌 Use this number in the OTP Group.\n` +
+      `OTP will appear here and balance will be updated automatically.`;
+
+    await ctx.editMessageText(message, {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📨 Open OTP Group', url: OTP_GROUP }],
+          [{ text: '🔄 Get New Numbers', callback_data: `get_new_numbers:${serviceId}:${countryCode}` }],
+          [{ text: '🔙 Service List', callback_data: 'back_to_services' }]
+        ]
+      }
+    });
+
+  } catch (error) {
+    console.error("Get new numbers error:", error);
+    await ctx.answerCbQuery("❌ Error", { show_alert: true });
+  }
 });
 
 /******************** BACK TO SERVICES ********************/
@@ -1412,19 +1373,42 @@ bot.action("back_to_services", async (ctx) => {
       const availableCountries = getAvailableCountriesForService(serviceId);
       if (availableCountries.length > 0) {
         let totalNums = 0;
-        for (const cc of availableCountries) totalNums += (numbersByCountryService[cc]?.[serviceId]?.length || 0);
+        for (const cc of availableCountries) {
+          totalNums += (numbersByCountryService[cc]?.[serviceId]?.length || 0);
+        }
         availableServices.push({ serviceId, service, totalNums });
       }
     }
+
     const serviceButtons = [];
     for (let i = 0; i < availableServices.length; i += 2) {
       const row = [];
-      row.push({ text: `${availableServices[i].service.icon} ${availableServices[i].service.name} (${availableServices[i].totalNums})`, callback_data: `select_service:${availableServices[i].serviceId}` });
-      if (availableServices[i + 1]) row.push({ text: `${availableServices[i+1].service.icon} ${availableServices[i+1].service.name} (${availableServices[i+1].totalNums})`, callback_data: `select_service:${availableServices[i+1].serviceId}` });
+      row.push({
+        text: `${availableServices[i].service.icon} ${availableServices[i].service.name} (${availableServices[i].totalNums})`,
+        callback_data: `select_service:${availableServices[i].serviceId}`
+      });
+      if (availableServices[i + 1]) {
+        row.push({
+          text: `${availableServices[i+1].service.icon} ${availableServices[i+1].service.name} (${availableServices[i+1].totalNums})`,
+          callback_data: `select_service:${availableServices[i+1].serviceId}`
+        });
+      }
       serviceButtons.push(row);
     }
-    await ctx.editMessageText("🎯 *Select a Service*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: serviceButtons } });
-  } catch (error) { console.error("Back to services error:", error); await ctx.answerCbQuery("❌ Error", { show_alert: true }); }
+
+    await ctx.editMessageText(
+      "🎯 *Select a Service*\n\n" +
+      "Which service do you need a number for?\n" +
+      "_(number in brackets = available count)_",
+      {
+        parse_mode: "Markdown",
+        reply_markup: { inline_keyboard: serviceButtons }
+      }
+    );
+  } catch (error) {
+    console.error("Back to services error:", error);
+    await ctx.answerCbQuery("❌ Error", { show_alert: true });
+  }
 });
 
 /******************** BALANCE ********************/
@@ -1432,31 +1416,113 @@ bot.hears("💰 Balances", async (ctx) => {
   clearUserState(ctx);
   const userId = ctx.from.id.toString();
   const e = getUserEarnings(userId);
-  const pendingWithdrawals = withdrawals.filter(w => w.userId === userId && w.status === "pending");
-  const totalWithdrawn = withdrawals.filter(w => w.userId === userId && w.status === "approved").reduce((sum, w) => sum + w.amount, 0);
-  await ctx.reply(`💰 *Your Earnings*\n\n💵 *Current Balance:* ${e.balance.toFixed(2)} taka\n📈 *Total Earned:* ${e.totalEarned.toFixed(2)} taka\n📨 *Total OTPs:* ${e.otpCount || 0}\n💸 *Total Withdrawn:* ${totalWithdrawn.toFixed(2)} taka\n⏳ *Pending Withdrawals:* ${pendingWithdrawals.length}\n\n📌 *Minimum Withdraw:* ${settings.minWithdraw} taka`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "💸 Withdraw", callback_data: "start_withdraw" }], [{ text: "📋 Withdraw History", callback_data: "withdraw_history" }]] } });
+
+  const pendingWithdrawals = withdrawals.filter(
+    w => w.userId === userId && w.status === "pending"
+  );
+  const totalWithdrawn = withdrawals
+    .filter(w => w.userId === userId && w.status === "approved")
+    .reduce((sum, w) => sum + w.amount, 0);
+
+  await ctx.reply(
+    `💰 *Your Earnings*\n\n` +
+    `💵 *Current Balance:* ${e.balance.toFixed(2)} taka\n` +
+    `📈 *Total Earned:* ${e.totalEarned.toFixed(2)} taka\n` +
+    `📨 *Total OTPs:* ${e.otpCount || 0}\n` +
+    `💸 *Total Withdrawn:* ${totalWithdrawn.toFixed(2)} taka\n` +
+    `⏳ *Pending Withdrawals:* ${pendingWithdrawals.length}\n\n` +
+    `📌 *Minimum Withdraw:* ${settings.minWithdraw} taka\n\n` +
+    `💡 Balance is added automatically when OTP is received.`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "💸 Withdraw", callback_data: "start_withdraw" }],
+          [{ text: "📋 Withdraw History", callback_data: "withdraw_history" }]
+        ]
+      }
+    }
+  );
 });
 
 /******************** WITHDRAW ********************/
 bot.hears("💸 Withdraw", async (ctx) => {
   ctx.session.withdrawState = null;
   ctx.session.withdrawData = null;
+
   const userId = ctx.from.id.toString();
   const e = getUserEarnings(userId);
-  if (!settings.withdrawEnabled) return await ctx.reply("⏸️ *Withdrawals are currently disabled.*", { parse_mode: "Markdown" });
-  if (e.balance < settings.minWithdraw) return await ctx.reply(`❌ *Insufficient balance.*\n\n💵 Balance: ${e.balance.toFixed(2)} taka\n📌 Minimum: ${settings.minWithdraw} taka`, { parse_mode: "Markdown" });
-  await ctx.reply(`💸 *Withdraw*\n\n💵 Your balance: *${e.balance.toFixed(2)} taka*\n📌 Minimum: *${settings.minWithdraw} taka*\n\nChoose your withdrawal method:`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🟣 bKash", callback_data: "withdraw_method:bKash" }, { text: "🟠 Nagad", callback_data: "withdraw_method:Nagad" }], [{ text: "❌ Cancel", callback_data: "withdraw_cancel" }]] } });
+
+  if (!settings.withdrawEnabled) {
+    return await ctx.reply("⏸️ *Withdrawals are currently disabled.*\nPlease try again later.", { parse_mode: "Markdown" });
+  }
+
+  if (e.balance < settings.minWithdraw) {
+    return await ctx.reply(
+      `❌ *Insufficient balance for withdrawal.*\n\n` +
+      `💵 Your balance: *${e.balance.toFixed(2)} taka*\n` +
+      `📌 Minimum: *${settings.minWithdraw} taka*\n\n` +
+      `You need ${(settings.minWithdraw - e.balance).toFixed(2)} more taka.`,
+      { parse_mode: "Markdown" }
+    );
+  }
+
+  await ctx.reply(
+    `💸 *Withdraw*\n\n` +
+    `💵 Your balance: *${e.balance.toFixed(2)} taka*\n` +
+    `📌 Minimum: *${settings.minWithdraw} taka*\n\n` +
+    `Choose your withdrawal method:`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "🟣 bKash", callback_data: "withdraw_method:bKash" },
+            { text: "🟠 Nagad", callback_data: "withdraw_method:Nagad" }
+          ],
+          [{ text: "❌ Cancel", callback_data: "withdraw_cancel" }]
+        ]
+      }
+    }
+  );
 });
 
 bot.action("start_withdraw", async (ctx) => {
   await ctx.answerCbQuery();
   ctx.session.withdrawState = null;
   ctx.session.withdrawData = null;
+
   const userId = ctx.from.id.toString();
   const e = getUserEarnings(userId);
-  if (!settings.withdrawEnabled) return await ctx.editMessageText("⏸️ *Withdrawals are currently disabled.*", { parse_mode: "Markdown" });
-  if (e.balance < settings.minWithdraw) return await ctx.editMessageText(`❌ *Insufficient balance.*\n\n💵 Balance: ${e.balance.toFixed(2)} taka\n📌 Minimum: ${settings.minWithdraw} taka`, { parse_mode: "Markdown" });
-  await ctx.editMessageText(`💸 *Withdraw*\n\n💵 Your balance: *${e.balance.toFixed(2)} taka*\n📌 Minimum: *${settings.minWithdraw} taka*\n\nChoose your withdrawal method:`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🟣 bKash", callback_data: "withdraw_method:bKash" }, { text: "🟠 Nagad", callback_data: "withdraw_method:Nagad" }], [{ text: "❌ Cancel", callback_data: "withdraw_cancel" }]] } });
+
+  if (!settings.withdrawEnabled) {
+    return await ctx.editMessageText("⏸️ *Withdrawals are currently disabled.*", { parse_mode: "Markdown" });
+  }
+  if (e.balance < settings.minWithdraw) {
+    return await ctx.editMessageText(
+      `❌ *Insufficient balance.*\n\n💵 Balance: ${e.balance.toFixed(2)} taka\n📌 Minimum: ${settings.minWithdraw} taka`,
+      { parse_mode: "Markdown" }
+    );
+  }
+
+  await ctx.editMessageText(
+    `💸 *Withdraw*\n\n` +
+    `💵 Your balance: *${e.balance.toFixed(2)} taka*\n` +
+    `📌 Minimum: *${settings.minWithdraw} taka*\n\n` +
+    `Choose your withdrawal method:`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "🟣 bKash", callback_data: "withdraw_method:bKash" },
+            { text: "🟠 Nagad", callback_data: "withdraw_method:Nagad" }
+          ],
+          [{ text: "❌ Cancel", callback_data: "withdraw_cancel" }]
+        ]
+      }
+    }
+  );
 });
 
 bot.action(/^withdraw_method:(.+)$/, async (ctx) => {
@@ -1468,20 +1534,37 @@ bot.action(/^withdraw_method:(.+)$/, async (ctx) => {
   const bal = e.balance;
   const min = settings.minWithdraw;
   const fullBal = Math.floor(bal * 100) / 100;
+
   ctx.session.withdrawState = "waiting_amount";
   ctx.session.withdrawData = { method };
+
   const amountButtons = [];
   const amounts = [];
   if (bal >= min) amounts.push(min);
   if (bal >= 100 && !amounts.includes(100)) amounts.push(100);
   if (bal >= 200 && !amounts.includes(200)) amounts.push(200);
   if (bal >= 500 && !amounts.includes(500)) amounts.push(500);
+
   const row = [];
-  for (const amt of amounts) { row.push({ text: `${amt} taka`, callback_data: `withdraw_amount:${method}:${amt}` }); if (row.length === 2) { amountButtons.push([...row]); row.length = 0; } }
+  for (const amt of amounts) {
+    row.push({ text: `${amt} taka`, callback_data: `withdraw_amount:${method}:${amt}` });
+    if (row.length === 2) { amountButtons.push([...row]); row.length = 0; }
+  }
   if (row.length > 0) amountButtons.push([...row]);
+
   amountButtons.push([{ text: `💰 All taka (${fullBal} taka)`, callback_data: `withdraw_amount:${method}:${fullBal}` }]);
   amountButtons.push([{ text: "❌ Cancel", callback_data: "withdraw_cancel" }]);
-  await ctx.editMessageText(`${icon} *${method} Withdrawal*\n\n💰 Your balance: *${e.balance.toFixed(2)} taka*\n📌 Minimum: *${settings.minWithdraw} taka*\n\nSelect an amount or type in chat:`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: amountButtons } });
+
+  await ctx.editMessageText(
+    `${icon} *${method} Withdrawal*\n\n` +
+    `💰 Your balance: *${e.balance.toFixed(2)} taka*\n` +
+    `📌 Minimum: *${settings.minWithdraw} taka*\n\n` +
+    `Select from the buttons below\nor type an amount in chat (e.g.: \`75\`):`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: amountButtons }
+    }
+  );
 });
 
 bot.action(/^withdraw_amount:([^:]+):(.+)$/, async (ctx) => {
@@ -1491,29 +1574,91 @@ bot.action(/^withdraw_amount:([^:]+):(.+)$/, async (ctx) => {
   const userId = ctx.from.id.toString();
   const e = getUserEarnings(userId);
   const icon = method === "bKash" ? "🟣" : "🟠";
-  if (isNaN(amount) || amount <= 0) return await ctx.editMessageText("❌ Invalid amount.", { parse_mode: "Markdown" });
-  if (amount < settings.minWithdraw) return await ctx.editMessageText(`❌ Minimum *${settings.minWithdraw} taka* required.`, { parse_mode: "Markdown" });
-  if (amount > e.balance) return await ctx.editMessageText(`❌ Insufficient balance! Your balance: *${e.balance.toFixed(2)} taka*`, { parse_mode: "Markdown" });
+
+  if (isNaN(amount) || amount <= 0) {
+    return await ctx.editMessageText("❌ An error occurred. Please try again.", {
+      parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "start_withdraw" }]] }
+    });
+  }
+
+  if (amount < settings.minWithdraw) {
+    return await ctx.editMessageText(
+      `❌ Minimum *${settings.minWithdraw} taka* is required.`,
+      { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "start_withdraw" }]] } }
+    );
+  }
+
+  if (amount > e.balance) {
+    return await ctx.editMessageText(
+      `❌ Insufficient balance! Your balance: *${e.balance.toFixed(2)} taka*`,
+      { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "start_withdraw" }]] } }
+    );
+  }
+
   ctx.session.withdrawState = "waiting_account";
   ctx.session.withdrawData = { method, amount };
-  await ctx.editMessageText(`${icon} *${method} - ${amount.toFixed(2)} taka*\n\n📱 Your *${method} number:*\nExample: \`01712345678\`\n\nType /cancel to cancel`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "withdraw_cancel" }]] } });
+
+  await ctx.editMessageText(
+    `${icon} *${method} - ${amount.toFixed(2)} taka*\n\n` +
+    `📱 Your *${method} number:*\n` +
+    `Example: \`01712345678\`\n\n` +
+    `Type /cancel to cancel`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [[{ text: "❌ Cancel", callback_data: "withdraw_cancel" }]]
+      }
+    }
+  );
 });
 
 bot.action("withdraw_history", async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id.toString();
   const userWithdrawals = withdrawals.filter(w => w.userId === userId).slice(-10).reverse();
-  let text = "📋 *Withdraw History*\n\n";
-  if (userWithdrawals.length === 0) text += "No withdrawal requests yet.";
-  else userWithdrawals.forEach(w => { const icon = w.status === "approved" ? "✅" : w.status === "rejected" ? "❌" : "⏳"; const date = new Date(w.requestedAt).toLocaleDateString('en-GB'); text += `${icon} *${w.amount.toFixed(2)} taka* - ${w.method}\n📱 \`${w.account}\` | ${date}\n\n`; });
-  await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "goto_main_menu" }]] } });
+
+  try {
+    let text = "📋 *Withdraw History*\n\n";
+    if (userWithdrawals.length === 0) {
+      text += "No withdrawal requests yet.";
+    } else {
+      userWithdrawals.forEach((w) => {
+        const icon = w.status === "approved" ? "✅" : w.status === "rejected" ? "❌" : "⏳";
+        const date = new Date(w.requestedAt).toLocaleDateString('en-GB');
+        text += `${icon} *${w.amount.toFixed(2)} taka* - ${w.method}\n`;
+        text += `📱 \`${w.account}\` | ${date}\n\n`;
+      });
+    }
+
+    if (text.length > 4000) text = text.substring(0, 3950) + '\n\n_...truncated_';
+
+    await ctx.editMessageText(text, {
+      parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "goto_main_menu" }]] }
+    });
+  } catch(error) {
+    console.error("Withdraw history error:", error.message);
+    if (error.message?.includes("message is not modified")) return;
+    try {
+      await ctx.editMessageText("❌ Error loading history.", {
+        reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "goto_main_menu" }]] }
+      });
+    } catch(e) {}
+  }
 });
 
 bot.action("withdraw_cancel", async (ctx) => {
   await ctx.answerCbQuery();
   ctx.session.withdrawState = null;
   ctx.session.withdrawData = null;
-  await ctx.editMessageText("❌ *Withdrawal cancelled.*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🏠 Main Menu", callback_data: "goto_main_menu" }]] } });
+  await ctx.editMessageText(
+    "❌ *Withdrawal cancelled.*\n\nPress 💸 Withdraw to try again.",
+    {
+      parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: [[{ text: "🏠 Main Menu", callback_data: "goto_main_menu" }]] }
+    }
+  );
 });
 
 bot.action("withdraw_confirm", async (ctx) => {
@@ -1521,58 +1666,160 @@ bot.action("withdraw_confirm", async (ctx) => {
     await ctx.answerCbQuery();
     const userId = ctx.from.id.toString();
     if (ctx.session.withdrawState !== "confirm") return;
+
     const { method, account, amount } = ctx.session.withdrawData;
     const userEarnings = getUserEarnings(userId);
-    if (userEarnings.balance < amount) { ctx.session.withdrawState = null; ctx.session.withdrawData = null; return await ctx.editMessageText("❌ Balance changed.", { parse_mode: "Markdown" }); }
+
+    if (userEarnings.balance < amount) {
+      ctx.session.withdrawState = null;
+      ctx.session.withdrawData = null;
+      return await ctx.editMessageText("❌ Balance has changed. Please try again.", { parse_mode: "Markdown" });
+    }
+
     userEarnings.balance = parseFloat((userEarnings.balance - amount).toFixed(2));
     saveEarnings();
+
     const withdrawId = Date.now().toString();
-    withdrawals.push({ id: withdrawId, userId, userName: ctx.from.first_name || "User", userUsername: ctx.from.username || "", amount, method, account, status: "pending", requestedAt: new Date().toISOString(), processedAt: null });
+    withdrawals.push({
+      id: withdrawId,
+      userId,
+      userName: ctx.from.first_name || "User",
+      userUsername: ctx.from.username || "",
+      amount,
+      method,
+      account,
+      status: "pending",
+      requestedAt: new Date().toISOString(),
+      processedAt: null
+    });
     saveWithdrawals();
+
     ctx.session.withdrawState = null;
     ctx.session.withdrawData = null;
-    await ctx.editMessageText(`✅ *Withdrawal Request Submitted!*\n\n💳 Method: ${method}\n📱 Account: ${account}\n💵 Amount: ${amount.toFixed(2)} taka\n\n⏳ Payment will be sent after admin approval.`, { parse_mode: "Markdown" });
+
+    await ctx.editMessageText(
+      `✅ *Withdrawal Request Submitted!*\n\n` +
+      `💳 Method: ${method}\n` +
+      `📱 Account: ${account}\n` +
+      `💵 Amount: ${amount.toFixed(2)} taka\n\n` +
+      `⏳ Payment will be sent after admin approval.`,
+      { parse_mode: "Markdown" }
+    );
+
     for (const adminId of admins) {
-      try { await ctx.telegram.sendMessage(adminId, `🔔 *New Withdrawal Request!*\n\n👤 User: ${ctx.from.first_name} (@${ctx.from.username || "N/A"})\n🆔 ID: ${userId}\n💳 Method: ${method}\n📱 Account: ${account}\n💵 Amount: ${amount.toFixed(2)} taka`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "✅ Approve", callback_data: `wadmin_approve:${withdrawId}` }, { text: "❌ Reject", callback_data: `wadmin_reject:${withdrawId}` }]] } }); } catch (e) {} }
-  } catch (error) { console.error("Withdraw confirm error:", error); }
+      try {
+        await ctx.telegram.sendMessage(
+          adminId,
+          `🔔 *New Withdrawal Request!*\n\n` +
+          `👤 User: ${ctx.from.first_name} (@${ctx.from.username || "N/A"})\n` +
+          `🆔 ID: ${userId}\n` +
+          `💳 Method: ${method}\n` +
+          `📱 Account: ${account}\n` +
+          `💵 Amount: ${amount.toFixed(2)} taka`,
+          {
+            parse_mode: "Markdown",
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "✅ Approve", callback_data: `wadmin_approve:${withdrawId}` },
+                  { text: "❌ Reject", callback_data: `wadmin_reject:${withdrawId}` }
+                ]
+              ]
+            }
+          }
+        );
+      } catch (e) {}
+    }
+  } catch (error) {
+    console.error("Withdraw confirm error:", error);
+    try { await ctx.reply("❌ An error occurred. Please try again."); } catch(e) {}
+  }
 });
 
 /******************** ADMIN WITHDRAW APPROVE/REJECT ********************/
 bot.action(/^wadmin_approve:(.+)$/, async (ctx) => {
   if (!ctx.session.isAdmin && !isAdmin(ctx.from.id.toString())) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery("✅ Approving...");
+
   const withdrawId = ctx.match[1];
   const w = withdrawals.find(w => w.id === withdrawId);
   if (!w) return await ctx.editMessageText("❌ Request not found.");
-  if (w.status !== "pending") return await ctx.editMessageText(`⚠️ Already ${w.status}.`);
+
+  if (w.status !== "pending") return await ctx.editMessageText(`⚠️ This request is already ${w.status}.`);
+
   w.status = "approved";
   w.processedAt = new Date().toISOString();
   saveWithdrawals();
-  await ctx.editMessageText(`✅ *Withdraw Approved!*\n\n👤 ${w.userName}\n💵 ${w.amount.toFixed(2)} taka → ${w.method}\n📱 ${w.account}`, { parse_mode: "Markdown" });
-  try { await ctx.telegram.sendMessage(w.userId, `✅ *Your Withdrawal has been Approved!*\n\n💵 Amount: ${w.amount.toFixed(2)} taka\n💳 Method: ${w.method}\n📱 Account: ${w.account}`, { parse_mode: "Markdown" }); } catch (e) {}
+
+  await ctx.editMessageText(
+    `✅ *Withdraw Approved!*\n\n` +
+    `👤 ${w.userName}\n💵 ${w.amount.toFixed(2)} taka → ${w.method}\n📱 ${w.account}`,
+    { parse_mode: "Markdown" }
+  );
+
+  try {
+    await ctx.telegram.sendMessage(
+      w.userId,
+      `✅ *Your Withdrawal has been Approved!*\n\n` +
+      `💵 Amount: ${w.amount.toFixed(2)} taka\n` +
+      `💳 Method: ${w.method}\n` +
+      `📱 Account: ${w.account}\n\n` +
+      `Payment will be sent shortly.`,
+      { parse_mode: "Markdown" }
+    );
+  } catch (e) {}
 });
 
 bot.action(/^wadmin_reject:(.+)$/, async (ctx) => {
   if (!ctx.session.isAdmin && !isAdmin(ctx.from.id.toString())) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery("❌ Rejecting...");
+
   const withdrawId = ctx.match[1];
   const w = withdrawals.find(w => w.id === withdrawId);
   if (!w) return await ctx.editMessageText("❌ Request not found.");
   if (w.status !== "pending") return await ctx.editMessageText(`⚠️ Already ${w.status}.`);
+
   w.status = "rejected";
   w.processedAt = new Date().toISOString();
   saveWithdrawals();
+
   const userEarnings = getUserEarnings(w.userId);
   userEarnings.balance = parseFloat((userEarnings.balance + w.amount).toFixed(2));
   saveEarnings();
-  await ctx.editMessageText(`❌ *Withdraw Rejected & Refunded!*\n\n👤 ${w.userName}\n💵 ${w.amount.toFixed(2)} taka refunded.`, { parse_mode: "Markdown" });
-  try { await ctx.telegram.sendMessage(w.userId, `❌ *Your Withdrawal Request was Rejected.*\n\n💵 ${w.amount.toFixed(2)} taka has been refunded.`, { parse_mode: "Markdown" }); } catch (e) {}
+
+  await ctx.editMessageText(
+    `❌ *Withdraw Rejected & Refunded!*\n\n` +
+    `👤 ${w.userName}\n💵 ${w.amount.toFixed(2)} taka refunded.`,
+    { parse_mode: "Markdown" }
+  );
+
+  try {
+    await ctx.telegram.sendMessage(
+      w.userId,
+      `❌ *Your Withdrawal Request was Rejected.*\n\n` +
+      `💵 ${w.amount.toFixed(2)} taka has been refunded to your balance.`,
+      { parse_mode: "Markdown" }
+    );
+  } catch (e) {}
 });
 
 /******************** 2FA MENU ********************/
 bot.hears(["🔐 2FA", "🔐 2FA Codes"], async (ctx) => {
   clearUserState(ctx);
-  await ctx.reply("🔐 *2-Step Verification Code Generator*\n\nSelect a service:", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "📘 Facebook 2FA", callback_data: "totp_service:facebook" }], [{ text: "📸 Instagram 2FA", callback_data: "totp_service:instagram" }], [{ text: "🔍 Google 2FA", callback_data: "totp_service:google" }], [{ text: "⚙️ Other Service 2FA", callback_data: "totp_service:other" }]] } });
+  await ctx.reply(
+    "🔐 *2-Step Verification Code Generator*\n\nSelect a service:",
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📘 Facebook 2FA", callback_data: "totp_service:facebook" }],
+          [{ text: "📸 Instagram 2FA", callback_data: "totp_service:instagram" }],
+          [{ text: "🔍 Google 2FA", callback_data: "totp_service:google" }],
+          [{ text: "⚙️ Other Service 2FA", callback_data: "totp_service:other" }]
+        ]
+      }
+    }
+  );
 });
 
 /******************** TOTP HANDLERS ********************/
@@ -1581,27 +1828,88 @@ bot.action(/^totp_service:(.+)$/, async (ctx) => {
   const service = ctx.match[1];
   const icons = { facebook: "📘", instagram: "📸", google: "🔍", other: "⚙️" };
   const names = { facebook: "Facebook", instagram: "Instagram", google: "Google", other: "Other" };
+
   ctx.session.totpState = "waiting_secret";
   ctx.session.totpData = { service };
-  await ctx.editMessageText(`${icons[service] || "🔐"} *${names[service] || service} Secret Key*\n\nSend your Authenticator Secret Key.\n\n🔑 Example: \`JBSWY3DPEHPK3PXP\`\n\nType /cancel to cancel`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "totp_back" }]] } });
+
+  const icon = icons[service] || "🔐";
+  const name = names[service] || service;
+
+  await ctx.editMessageText(
+    `${icon} *${name} Secret Key*\n\n` +
+    `Send your Authenticator Secret Key.\n\n` +
+    `📌 *Where to find your key:*\n` +
+    `• Facebook: Settings → Security → Two-Factor Authentication → Authenticator App → Setup Key\n` +
+    `• Instagram: Settings → Security → Two-Factor → Authentication App → Manual key\n\n` +
+    `🔑 It looks like: \`JBSWY3DPEHPK3PXP\`\n\n` +
+    `Type /cancel to cancel`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [[{ text: "❌ Cancel", callback_data: "totp_back" }]]
+      }
+    }
+  );
 });
 
 bot.action(/^totp_refresh:([^:]+):(.+)$/, async (ctx) => {
   try {
-    await ctx.answerCbQuery("🔄 Refreshing...");
+    await ctx.answerCbQuery("🔄 Refreshing code...");
     const service = ctx.match[1];
     const secret = decodeURIComponent(ctx.match[2]);
     const result = generateTOTP(secret);
-    if (!result) return await ctx.editMessageText("❌ *Invalid secret key.*", { parse_mode: "Markdown" });
+
+    if (!result) {
+      return await ctx.editMessageText(
+        "❌ *Could not generate code.* Invalid secret key.",
+        { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "totp_back" }]] } }
+      );
+    }
+
     const icon = service === "facebook" ? "📘" : service === "instagram" ? "📸" : service === "google" ? "🔍" : "⚙️";
     const name = service === "facebook" ? "Facebook" : service === "instagram" ? "Instagram" : service === "google" ? "Google" : "2FA";
-    await ctx.editMessageText(`${icon} *${name} 2FA Code*\n\n🔑 *Code:* \`${result.token}\`\n⏰ *${result.timeRemaining} seconds remaining*`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔄 Refresh", callback_data: `totp_refresh:${service}:${encodeURIComponent(secret)}` }], [{ text: "🔙 Back", callback_data: "totp_back" }]] } });
-  } catch (error) { console.error("TOTP error:", error); }
+
+    try {
+      await ctx.editMessageText(
+        `${icon} *${name} 2FA Code*\n\n` +
+        `🔑 *Code:* \`${result.token}\`\n\n` +
+        `⏰ *${result.timeRemaining} seconds remaining*\n\n` +
+        `📋 Copy the code and enter it on the site.`,
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "🔄 Refresh Code", callback_data: `totp_refresh:${service}:${encodeURIComponent(secret)}` }],
+              [{ text: "🔙 Back", callback_data: "totp_back" }]
+            ]
+          }
+        }
+      );
+    } catch (editErr) {
+      if (!editErr.message || !editErr.message.includes("message is not modified")) throw editErr;
+    }
+  } catch (error) {
+    console.error("TOTP refresh error:", error);
+    try { await ctx.answerCbQuery("❌ Error refreshing code", { show_alert: true }); } catch(e) {}
+  }
 });
 
 bot.action("totp_back", async (ctx) => {
   await ctx.answerCbQuery();
-  await ctx.editMessageText("🔐 *2FA Code Generator*\n\nSelect a service:", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "📘 Facebook 2FA", callback_data: "totp_service:facebook" }], [{ text: "📸 Instagram 2FA", callback_data: "totp_service:instagram" }], [{ text: "🔍 Google 2FA", callback_data: "totp_service:google" }], [{ text: "⚙️ Other Service 2FA", callback_data: "totp_service:other" }]] } });
+  await ctx.editMessageText(
+    "🔐 *2FA Code Generator*\n\nSelect a service:",
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📘 Facebook 2FA", callback_data: "totp_service:facebook" }],
+          [{ text: "📸 Instagram 2FA", callback_data: "totp_service:instagram" }],
+          [{ text: "🔍 Google 2FA", callback_data: "totp_service:google" }],
+          [{ text: "⚙️ Other Service 2FA", callback_data: "totp_service:other" }]
+        ]
+      }
+    }
+  );
 });
 
 /******************** TEMP MAIL ********************/
@@ -1609,343 +1917,1299 @@ bot.hears(["📧 Temp Mail", "📧 Get Tempmail"], async (ctx) => {
   clearUserState(ctx);
   const userId = ctx.from.id.toString();
   const existing = tempMails[userId];
+
   if (existing) {
-    await ctx.reply(`📧 *Temporary Email*\n\n📌 Your email:\n\`${existing.address}\`\n\n⚠️ Getting a new email will delete this one.`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "📬 Check Inbox", callback_data: "tempmail_inbox" }], [{ text: "📋 Show Email", callback_data: "tempmail_showaddress" }], [{ text: "🔄 New Email", callback_data: "tempmail_create" }], [{ text: "🗑️ Delete", callback_data: "tempmail_delete" }]] } });
+    await ctx.reply(
+      `📧 *Temporary Email*\n\n📌 Your email:\n\`${existing.address}\`\n\n⚠️ Getting a new email will delete this one.`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "📬 Check Inbox", callback_data: "tempmail_inbox" }],
+            [{ text: "📋 Show Email Address", callback_data: "tempmail_showaddress" }],
+            [{ text: "🔄 Get New Email", callback_data: "tempmail_create" }],
+            [{ text: "🗑️ Delete Email", callback_data: "tempmail_delete" }]
+          ]
+        }
+      }
+    );
   } else {
-    await ctx.reply("📧 *Temporary Email*\n\n✅ Create a new disposable email address.", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🆕 Create New Email", callback_data: "tempmail_create" }]] } });
+    await ctx.reply(
+      "📧 *Temporary Email*\n\n✅ Create a new disposable email address.\n⚡ Instant • Unlimited • No signup",
+      {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🆕 Create New Email", callback_data: "tempmail_create" }]
+          ]
+        }
+      }
+    );
   }
 });
 
 bot.action("tempmail_create", async (ctx) => {
   const userId = ctx.from.id.toString();
+
   await ctx.answerCbQuery("⏳ Creating email...");
+
   const loadingMsg = await ctx.reply("⏳ *Creating your email...*", { parse_mode: "Markdown" });
+
   setImmediate(async () => {
     try {
       if (tempMails[userId]) delete tempMails[userId];
+
       const newEmail = await createFreshEmail();
-      if (!newEmail) { await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, null, `❌ *Email creation failed.*`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔄 Retry", callback_data: "tempmail_create" }]] } }); return; }
+
+      if (!newEmail) {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id, loadingMsg.message_id, null,
+          `❌ *Email creation failed.*\n\nMail.tm is busy. Please try again in 1 minute.`,
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔄 Retry", callback_data: "tempmail_create" }]] } }
+        );
+        return;
+      }
+
       tempMails[userId] = newEmail;
       saveTempMails();
-      await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, null, `✅ *New Temporary Email Created!*\n\n📧 *Email Address:*\n\`${newEmail.address}\``, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "📬 Check Inbox", callback_data: "tempmail_inbox" }], [{ text: "📋 Show Email", callback_data: "tempmail_showaddress" }], [{ text: "🔄 New Email", callback_data: "tempmail_create" }], [{ text: "🗑️ Delete", callback_data: "tempmail_delete" }]] } });
-    } catch (error) { console.error("Temp mail error:", error.message); try { await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, null, `❌ *Error.*`, { parse_mode: "Markdown" }); } catch(e) {} }
+      console.log(`📧 Email created for user ${userId}: ${newEmail.address}`);
+
+      await ctx.telegram.editMessageText(
+        ctx.chat.id, loadingMsg.message_id, null,
+        `✅ *New Temporary Email Created!*\n\n📧 *Email Address:*\n\`${newEmail.address}\`\n\n📌 Use this address on any website.\n✉️ Tap *Check Inbox* after receiving an email.`,
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "📬 Check Inbox", callback_data: "tempmail_inbox" }],
+              [{ text: "📋 Show Email Address", callback_data: "tempmail_showaddress" }],
+              [{ text: "🔄 Get New Email", callback_data: "tempmail_create" }],
+              [{ text: "🗑️ Delete Email", callback_data: "tempmail_delete" }]
+            ]
+          }
+        }
+      );
+    } catch (error) {
+      console.error("Temp mail create error:", error.message);
+      try {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id, loadingMsg.message_id, null,
+          `❌ *An error occurred.* Please try again.`,
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔄 Retry", callback_data: "tempmail_create" }]] } }
+        );
+      } catch(e) {}
+    }
   });
 });
 
 bot.action("tempmail_inbox", async (ctx) => {
   try {
-    await ctx.answerCbQuery("📬 Loading...");
+    await ctx.answerCbQuery("📬 Loading inbox...");
     const userId = ctx.from.id.toString();
-    if (!tempMails[userId]) return await ctx.editMessageText("❌ *No email found.*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🆕 Create Email", callback_data: "tempmail_create" }]] } });
-    const { address, provider } = tempMails[userId];
+
+    if (!tempMails[userId]) {
+      return await ctx.editMessageText(
+        "❌ *No email found.*\n\nPress the button below to create a new email.",
+        { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🆕 Create New Email", callback_data: "tempmail_create" }]] } }
+      );
+    }
+
+    const { address, provider, sidToken } = tempMails[userId];
+
     let messages = [];
-    try { messages = await getEmailInbox(tempMails[userId]); } catch(e) {}
-    let text = `📬 *Inbox:* \`${address}\`\n_(via ${provider})_\n\n`;
-    if (messages.length === 0) text += `📭 *No emails yet.*`;
-    else messages.slice(0, 5).forEach(msg => { text += `━━━━━━━━━━━━━━━\n📩 *From:* ${msg.from}\n📌 *Subject:* ${msg.subject}\n🕐 ${msg.date}\n`; });
-    await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔄 Refresh", callback_data: "tempmail_inbox" }], [{ text: "🔙 Back", callback_data: "tempmail_create" }]] } });
-  } catch (error) { console.error("Inbox error:", error); }
+    try {
+      messages = await getEmailInbox(tempMails[userId]);
+      console.log(`📬 Inbox (${provider}): ${address} → ${messages.length} messages`);
+    } catch(e) {
+      console.error('Inbox fetch error:', e.message);
+    }
+
+    const now = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    let text = `📬 *Inbox:* \`${address}\`\n🕐 _Checked: ${now}_\n_(via ${provider})_\n\n`;
+
+    if (messages.length === 0) {
+      text += `📭 *No emails yet.*\n\nSend an email to this address, then tap Refresh.`;
+    } else {
+      text += `📨 *${messages.length} email(s):*\n\n`;
+
+      for (const msg of messages.slice(0, 5)) {
+        text += `━━━━━━━━━━━━━━━\n`;
+        text += `📩 *From:* ${String(msg.from || '').replace(/[_*`\[]/g, '\\$&')}\n`;
+        text += `📌 *Subject:* ${String(msg.subject || '(No Subject)').replace(/[_*`\[]/g, '\\$&')}\n`;
+        text += `🕐 ${msg.date}\n`;
+
+        try {
+          const body = await getEmailMessage(msg.id, tempMails[userId]);
+          if (body) {
+            const otpMatches = body.match(/\b\d{4,8}\b/g);
+            if (otpMatches && otpMatches.length > 0) {
+              text += `\n🔑 *OTP Code:* \`${otpMatches[0]}\`\n`;
+            }
+            const preview = body.substring(0, 300).replace(/[_*`\[]/g, '\\$&');
+            text += `\n📝 *Message:*\n_${preview}${body.length > 300 ? '...' : ''}_\n`;
+          }
+        } catch(e) {
+          console.error("Read message error:", e.message);
+        }
+
+        text += `\n`;
+      }
+    }
+
+    try {
+      await ctx.editMessageText(text, {
+        parse_mode: "Markdown",
+        reply_markup: { inline_keyboard: [
+          [{ text: "🔄 Refresh", callback_data: "tempmail_inbox" }],
+          [{ text: "📧 Show Email Address", callback_data: "tempmail_showaddress" }],
+          [{ text: "🔄 Get New Email", callback_data: "tempmail_create" }],
+          [{ text: "🗑️ Delete Email", callback_data: "tempmail_delete" }]
+        ]}
+      });
+    } catch (e) {
+      if (!e.message?.includes("message is not modified")) throw e;
+    }
+
+  } catch (error) {
+    console.error("Temp mail inbox error:", error);
+    try {
+      await ctx.editMessageText("❌ *An error occurred.* Please try again.", {
+        parse_mode: "Markdown",
+        reply_markup: { inline_keyboard: [[{ text: "🔄 Retry", callback_data: "tempmail_inbox" }]] }
+      });
+    } catch (e) {}
+  }
 });
 
 bot.action("tempmail_showaddress", async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from.id.toString();
-  if (!tempMails[userId]) return await ctx.answerCbQuery("❌ No email", { show_alert: true });
-  await ctx.editMessageText(`📧 *Your Temp Email:*\n\n\`${tempMails[userId].address}\``, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "📬 Check Inbox", callback_data: "tempmail_inbox" }]] } });
+  if (!tempMails[userId]) return await ctx.answerCbQuery("❌ No email found", { show_alert: true });
+  const { address } = tempMails[userId];
+  await ctx.editMessageText(
+    `📧 *Your Temp Email:*\n\n\`${address}\`\n\nCopy this address and use it on any website.`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📬 Check Inbox", callback_data: "tempmail_inbox" }],
+          [{ text: "🔄 Get New Email", callback_data: "tempmail_create" }]
+        ]
+      }
+    }
+  );
 });
 
 bot.action("tempmail_delete", async (ctx) => {
   const userId = ctx.from.id.toString();
   await ctx.answerCbQuery();
-  if (tempMails[userId]) { delete tempMails[userId]; saveTempMails(); await ctx.editMessageText("✅ *Email deleted.*", { parse_mode: "Markdown" }); }
-  else await ctx.editMessageText("❌ *No email found.*", { parse_mode: "Markdown" });
+  if (tempMails[userId]) {
+    delete tempMails[userId];
+    saveTempMails();
+    await ctx.editMessageText("✅ *Email deleted successfully.*", { parse_mode: "Markdown" });
+  } else {
+    await ctx.editMessageText("❌ *No email found.*", { parse_mode: "Markdown" });
+  }
 });
 
-/******************** SUPPORT & HELP ********************/
-bot.hears("💬 Support", async (ctx) => { await ctx.reply("💬 *Support*\n\nAdmin: @Rana1132", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "Contact", url: "https://t.me/Rana1132" }]] } }); });
-bot.hears("ℹ️ Help", async (ctx) => { await ctx.reply("📖 *Bot Help*\n\n• ☎️ Get Number\n• 📧 Get Tempmail\n• 🔐 2FA Codes\n• 💰 Balances\n• 💸 Withdraw\n\nAdmin: /adminlogin", { parse_mode: "Markdown" }); });
-bot.hears(["🏠 Home", "🏠 Main Menu"], async (ctx) => { clearUserState(ctx); await showMainMenu(ctx); });
+/******************** SUPPORT ********************/
+bot.hears("💬 Support", async (ctx) => {
+  await ctx.reply(
+    "💬 *Support*\n\nFor any issues or questions, contact our admin directly:\n\n📌 Admin: @Rana1132",
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "💬 Contact Support", url: "https://t.me/Rana1132" }]
+        ]
+      }
+    }
+  );
+});
+
+/******************** HELP ********************/
+bot.hears("ℹ️ Help", async (ctx) => {
+  await ctx.reply(
+    "📖 *Bot Help*\n\n" +
+    "• ☎️ *Get Number* - Get a number\n" +
+    "• 📧 *Get Tempmail* - Get a free temp email\n" +
+    "• 🔐 *2FA* - Facebook/Instagram 2-step code\n" +
+    "• 💰 *Balances* - View your earnings\n" +
+    "• 💸 *Withdraw* - Withdraw earnings\n\n" +
+    `📌 Minimum withdraw: ${settings.minWithdraw} taka\n\n` +
+    "Admin: /adminlogin",
+    { parse_mode: "Markdown" }
+  );
+});
+
+/******************** HOME HANDLER ********************/
+bot.hears(["🏠 Home", "🏠 Main Menu"], async (ctx) => {
+  clearUserState(ctx);
+  await showMainMenu(ctx);
+});
 
 /******************** ADMIN LOGIN ********************/
 bot.command("adminlogin", async (ctx) => {
-  const parts = ctx.message.text.split(' ');
-  if (parts.length < 2) return await ctx.reply("❌ Usage: /adminlogin [password]");
-  if (parts[1] === ADMIN_PASSWORD) {
-    ctx.session.isAdmin = true;
-    if (!admins.includes(ctx.from.id.toString())) { admins.push(ctx.from.id.toString()); saveAdmins(); }
-    await ctx.reply("✅ *Admin Login Successful!*\nUse /admin", { parse_mode: "Markdown" });
-  } else await ctx.reply("❌ Wrong password.");
+  try {
+    const parts = ctx.message.text.split(' ');
+
+    if (parts.length < 2) {
+      return await ctx.reply("❌ Usage: /adminlogin [password]");
+    }
+
+    const password = parts[1];
+
+    if (password === ADMIN_PASSWORD) {
+      ctx.session.isAdmin = true;
+
+      if (!admins.includes(ctx.from.id.toString())) {
+        admins.push(ctx.from.id.toString());
+        saveAdmins();
+      }
+
+      await ctx.reply(
+        "✅ *Admin Login Successful!*\n\n" +
+        "You now have administrator privileges.\n" +
+        "Use /admin to access admin panel.",
+        { parse_mode: "Markdown" }
+      );
+    } else {
+      await ctx.reply("❌ Wrong password. Access denied.");
+    }
+  } catch (error) {
+    console.error("Admin login error:", error);
+    await ctx.reply("❌ Error during admin login.");
+  }
 });
 
 /******************** ADMIN PANEL ********************/
 bot.command("admin", async (ctx) => {
-  if (!ctx.session.isAdmin && !isAdmin(ctx.from.id.toString())) return await ctx.reply("❌ *Admin Access Required*", { parse_mode: "Markdown" });
-  const buttons = [
-    [{ text: "📊 Stock Report", callback_data: "admin_stock" }, { text: "👥 User Stats", callback_data: "admin_users" }],
-    [{ text: "📢 Broadcast", callback_data: "admin_broadcast" }, { text: "📋 OTP Log", callback_data: "admin_otp_log" }],
-    [{ text: "➕ Add Numbers", callback_data: "admin_add_numbers" }, { text: "📤 Upload File", callback_data: "admin_upload" }],
-    [{ text: "🗑️ Delete Numbers", callback_data: "admin_delete" }, { text: "🔧 Manage Services", callback_data: "admin_manage_services" }],
-    [{ text: "🌍 Manage Countries", callback_data: "admin_manage_countries" }, { text: "⚙️ Settings", callback_data: "admin_settings" }],
-    [{ text: "💰 Country Prices", callback_data: "admin_country_prices" }, { text: "💸 Withdrawals", callback_data: "admin_withdrawals" }],
-    [{ text: "👛 Balance Management", callback_data: "admin_balance_manage" }, { text: "📦 Backup", callback_data: "admin_backup" }],
-    [{ text: "🚪 Logout", callback_data: "admin_logout" }]
-  ];
-  await ctx.reply("🛠 *Admin Dashboard*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: buttons } });
+  try {
+    if (!ctx.session.isAdmin && !isAdmin(ctx.from.id.toString())) {
+      return await ctx.reply(
+        "❌ *Admin Access Required*\n\n" +
+        "Use /adminlogin [password] to login as admin.",
+        { parse_mode: "Markdown" }
+      );
+    }
+
+    const buttons = [
+      [
+        { text: "📊 Stock Report", callback_data: "admin_stock" },
+        { text: "👥 User Stats", callback_data: "admin_users" }
+      ],
+      [
+        { text: "📢 Broadcast", callback_data: "admin_broadcast" },
+        { text: "📋 OTP Log", callback_data: "admin_otp_log" }
+      ],
+      [
+        { text: "➕ Add Numbers", callback_data: "admin_add_numbers" },
+        { text: "📤 Upload File", callback_data: "admin_upload" }
+      ],
+      [
+        { text: "🗑️ Delete Numbers", callback_data: "admin_delete" },
+        { text: "🔧 Manage Services", callback_data: "admin_manage_services" }
+      ],
+      [
+        { text: "🌍 Manage Countries", callback_data: "admin_manage_countries" },
+        { text: "⚙️ Settings", callback_data: "admin_settings" }
+      ],
+      [
+        { text: "💰 Country Prices", callback_data: "admin_country_prices" },
+        { text: "💸 Withdrawals", callback_data: "admin_withdrawals" }
+      ],
+      [
+        { text: "👛 Balance Management", callback_data: "admin_balance_manage" },
+        { text: "📦 Backup", callback_data: "admin_backup" }
+      ]
+    ];
+
+    buttons.push([
+      { text: "🚪 Logout", callback_data: "admin_logout" }
+    ]);
+
+    await ctx.reply(
+      "🛠 *Admin Dashboard*\n\n" +
+      "Select an option:",
+      {
+        parse_mode: "Markdown",
+        reply_markup: { inline_keyboard: buttons }
+      }
+    );
+
+  } catch (error) {
+    console.error("Admin command error:", error);
+    await ctx.reply("❌ Error accessing admin panel.");
+  }
 });
 
 /******************** ADMIN BACKUP MENU ********************/
 bot.action("admin_backup", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
+  
   let backupInfo = "";
-  try { const latest = await findLatestBackup(); if (latest) backupInfo = `\n📦 *Latest:* ${latest.fileName}`; else backupInfo = `\n⚠️ *No backups*`; } catch(e) {}
-  await ctx.editMessageText(`📦 *Backup Management*${backupInfo}`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🆕 Create Backup", callback_data: "admin_create_backup" }], [{ text: "🔄 Emergency Restore", callback_data: "admin_emergency_restore" }], [{ text: "📋 View Backups", callback_data: "admin_view_backups" }], [{ text: "🔙 Back", callback_data: "admin_back" }]] } });
+  try {
+    const latestBackup = await findLatestBackup();
+    if (latestBackup) {
+      const backupDate = new Date(latestBackup.timestamp.replace(/-/g, ':')).toLocaleString('en-GB');
+      backupInfo = `\n📦 *Latest Backup:* ${latestBackup.fileName}\n📅 *Date:* ${backupDate}\n`;
+    } else {
+      backupInfo = `\n⚠️ *No backups found* - Create one first!\n`;
+    }
+  } catch(e) {}
+  
+  await ctx.editMessageText(
+    `📦 *Backup Management*${backupInfo}\n\nSelect an option:`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🆕 Create Backup", callback_data: "admin_create_backup" }],
+          [{ text: "🔄 Emergency Restore", callback_data: "admin_emergency_restore" }],
+          [{ text: "📋 View Backups", callback_data: "admin_view_backups" }],
+          [{ text: "🔙 Back", callback_data: "admin_back" }]
+        ]
+      }
+    }
+  );
 });
 
 bot.action("admin_create_backup", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
-  await ctx.answerCbQuery("⏳ Creating...");
+  await ctx.answerCbQuery("⏳ Creating backup...");
+  
   const result = await createTelegramBackup(false);
-  if (result) await ctx.editMessageText(`✅ *Backup Created!*\n🆔 ID: \`${result.backupId}\``, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_backup" }]] } });
-  else await ctx.editMessageText("❌ *Backup failed*", { parse_mode: "Markdown" });
+  if (result) {
+    await ctx.editMessageText(
+      `✅ *Backup Created!*\n\n🆔 ID: \`${result.backupId}\`\n📦 Saved in backup group.`,
+      { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_backup" }]] } }
+    );
+  } else {
+    await ctx.editMessageText("❌ *Backup failed*", { parse_mode: "Markdown" });
+  }
 });
 
 bot.action("admin_emergency_restore", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  const loadingMsg = await ctx.editMessageText("🔍 *Searching...*", { parse_mode: "Markdown" });
+  
+  const loadingMsg = await ctx.editMessageText(
+    "🔍 *Searching for latest backup...*\n\nPlease wait...",
+    { parse_mode: "Markdown" }
+  );
+  
   try {
-    const latest = await findLatestBackup();
-    if (!latest) { await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, null, "❌ *No backup found*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_backup" }]] } }); return; }
-    await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, null, `📦 *Backup Found*\n\n📁 ${latest.fileName}\n\n⚠️ Type /confirm_restore to proceed.`, { parse_mode: "Markdown" });
-    ctx.session.pendingRestore = { fileId: latest.fileId, localPath: latest.localPath };
-  } catch (error) { await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, null, "❌ Error", { parse_mode: "Markdown" }); }
+    const latestBackup = await findLatestBackup();
+    
+    if (!latestBackup) {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        loadingMsg.message_id,
+        null,
+        "❌ *No backup found in the backup group.*\n\nPlease create a backup first using 'Create Backup' button.",
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "🔙 Back to Backup Menu", callback_data: "admin_backup" }]
+            ]
+          }
+        }
+      );
+      return;
+    }
+    
+    const backupDate = new Date(latestBackup.timestamp.replace(/-/g, ':')).toLocaleString('en-GB');
+    
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      loadingMsg.message_id,
+      null,
+      `📦 *Backup Found*\n\n` +
+      `📁 *File:* ${latestBackup.fileName}\n` +
+      `📅 *Date:* ${backupDate}\n\n` +
+      `⚠️ *WARNING:* This will overwrite ALL current data!\n\n` +
+      `Type /confirm_restore to proceed.\n` +
+      `Type /cancel to abort.`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "✅ Confirm Restore", callback_data: "admin_confirm_restore" },
+              { text: "❌ Cancel", callback_data: "admin_backup" }
+            ]
+          ]
+        }
+      }
+    );
+    
+    ctx.session.pendingRestore = latestBackup.fileId;
+    
+  } catch (error) {
+    console.error("Emergency restore error:", error);
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      loadingMsg.message_id,
+      null,
+      `❌ *Error searching for backup*\n\n${error.message}`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🔙 Back to Backup Menu", callback_data: "admin_backup" }]
+          ]
+        }
+      }
+    );
+  }
 });
 
 bot.action("admin_confirm_restore", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
-  if (!ctx.session.pendingRestore) return await ctx.editMessageText("❌ No restore pending.", { parse_mode: "Markdown" });
-  await ctx.answerCbQuery("⏳ Restoring...");
-  const loadingMsg = await ctx.editMessageText("⏳ *Restoring...*", { parse_mode: "Markdown" });
+  
+  if (!ctx.session.pendingRestore) {
+    await ctx.answerCbQuery("❌ No pending restore found");
+    return await ctx.editMessageText(
+      "❌ *No restore pending.*\n\nPlease use 'Emergency Restore' first.",
+      {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🔙 Back to Backup Menu", callback_data: "admin_backup" }]
+          ]
+        }
+      }
+    );
+  }
+  
+  await ctx.answerCbQuery("⏳ Restoring backup...");
+  
+  const loadingMsg = await ctx.editMessageText(
+    "⏳ *Restoring from backup...*\n\nThis may take a moment.\nPlease do not close this message.",
+    { parse_mode: "Markdown" }
+  );
+  
   try {
-    const restored = await restoreFromTelegramBackup(ctx.session.pendingRestore.fileId, ctx.session.pendingRestore.localPath);
-    if (restored) await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, null, `✅ *RESTORE SUCCESSFUL!*\n\n📦 ${restored.backupId}\n👥 Users: ${restored.stats.totalUsers}`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🛠 Admin", callback_data: "admin_back" }]] } });
-    else await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, null, "❌ *Restore failed*", { parse_mode: "Markdown" });
+    const restored = await restoreFromTelegramBackup(ctx.session.pendingRestore);
+    
+    if (restored) {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        loadingMsg.message_id,
+        null,
+        `✅ *RESTORE SUCCESSFUL!*\n\n` +
+        `📦 Backup: ${restored.backupId}\n` +
+        `👥 Users: ${restored.stats.totalUsers}\n` +
+        `💰 Total Earned: ${restored.stats.totalEarnings.toFixed(2)} TK\n` +
+        `💵 Pending Balance: ${restored.stats.totalBalance.toFixed(2)} TK\n\n` +
+        `⚠️ The bot has been restored to the backup state.`,
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "🛠 Back to Admin Panel", callback_data: "admin_back" }]
+            ]
+          }
+        }
+      );
+      
+      for (const adminId of admins) {
+        try {
+          await bot.telegram.sendMessage(
+            adminId,
+            `✅ *System Restored*\n\n` +
+            `Backup: ${restored.backupId}\n` +
+            `Users: ${restored.stats.totalUsers}\n` +
+            `Earnings: ${restored.stats.totalEarnings.toFixed(2)} TK\n\n` +
+            `Restored by: ${ctx.from.first_name}`,
+            { parse_mode: "Markdown" }
+          );
+        } catch(e) {}
+      }
+      
+    } else {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        loadingMsg.message_id,
+        null,
+        "❌ *RESTORE FAILED*\n\nCould not restore from backup. The backup file may be corrupted.",
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "🔙 Back to Backup Menu", callback_data: "admin_backup" }]
+            ]
+          }
+        }
+      );
+    }
+    
     ctx.session.pendingRestore = null;
-  } catch (error) { await ctx.telegram.editMessageText(ctx.chat.id, loadingMsg.message_id, null, "❌ Error", { parse_mode: "Markdown" }); ctx.session.pendingRestore = null; }
+    
+  } catch (error) {
+    console.error("Confirm restore error:", error);
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      loadingMsg.message_id,
+      null,
+      `❌ *RESTORE ERROR*\n\n${error.message}`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🔙 Back to Backup Menu", callback_data: "admin_backup" }]
+          ]
+        }
+      }
+    );
+    ctx.session.pendingRestore = null;
+  }
 });
 
 bot.action("admin_view_backups", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
+  
   try {
     const messages = await bot.telegram.getChatHistory(BACKUP_GROUP_ID, 50);
     const backups = [];
+    
     for (const msg of messages) {
       if (msg.document && msg.document.file_name && msg.document.file_name.endsWith('.json')) {
         const match = msg.document.file_name.match(/BACKUP_([\d\-T]+)\.json/);
-        if (match) backups.push({ name: msg.document.file_name, date: match[1], size: (msg.document.file_size / 1024).toFixed(2) });
+        if (match) {
+          backups.push({
+            name: msg.document.file_name,
+            date: match[1],
+            size: (msg.document.file_size / 1024).toFixed(2)
+          });
+        }
       }
     }
-    if (backups.length === 0) return await ctx.editMessageText("📭 *No backups*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_backup" }]] } });
-    let text = "📦 *Backups*\n\n";
-    backups.slice(0, 10).forEach((b, i) => { const date = new Date(b.date.replace(/-/g, ':')).toLocaleString('en-GB'); text += `${i+1}. ${b.name}\n   📅 ${date} | 💾 ${b.size} KB\n\n`; });
-    await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_backup" }]] } });
-  } catch (error) { await ctx.editMessageText("❌ Error", { parse_mode: "Markdown" }); }
+    
+    if (backups.length === 0) {
+      return await ctx.editMessageText(
+        "📭 *No backups found*\n\nPlease create a backup first using 'Create Backup'.",
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "🔙 Back to Backup Menu", callback_data: "admin_backup" }]
+            ]
+          }
+        }
+      );
+    }
+    
+    let message = "📦 *Available Backups*\n\n";
+    backups.slice(0, 10).forEach((b, i) => {
+      const date = new Date(b.date.replace(/-/g, ':')).toLocaleString('en-GB');
+      message += `${i+1}. \`${b.name}\`\n`;
+      message += `   📅 ${date} | 💾 ${b.size} KB\n\n`;
+    });
+    
+    message += `💡 Use "Emergency Restore" to restore the latest backup.`;
+    
+    await ctx.editMessageText(message, {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔄 Emergency Restore", callback_data: "admin_emergency_restore" }],
+          [{ text: "🔙 Back", callback_data: "admin_backup" }]
+        ]
+      }
+    });
+    
+  } catch (error) {
+    console.error("View backups error:", error);
+    await ctx.editMessageText(
+      "❌ *Error loading backups*\n\nMake sure the backup group exists and bot is admin there.",
+      {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🔙 Back", callback_data: "admin_backup" }]
+          ]
+        }
+      }
+    );
+  }
 });
 
+/******************** ADMIN BACK ********************/
 bot.action("admin_back", async (ctx) => {
   await ctx.answerCbQuery();
   ctx.session.adminState = null;
   ctx.session.adminData = null;
+
   const buttons = [
-    [{ text: "📊 Stock Report", callback_data: "admin_stock" }, { text: "👥 User Stats", callback_data: "admin_users" }],
-    [{ text: "📢 Broadcast", callback_data: "admin_broadcast" }, { text: "📋 OTP Log", callback_data: "admin_otp_log" }],
-    [{ text: "➕ Add Numbers", callback_data: "admin_add_numbers" }, { text: "📤 Upload File", callback_data: "admin_upload" }],
-    [{ text: "🗑️ Delete Numbers", callback_data: "admin_delete" }, { text: "🔧 Manage Services", callback_data: "admin_manage_services" }],
-    [{ text: "🌍 Manage Countries", callback_data: "admin_manage_countries" }, { text: "⚙️ Settings", callback_data: "admin_settings" }],
-    [{ text: "💰 Country Prices", callback_data: "admin_country_prices" }, { text: "💸 Withdrawals", callback_data: "admin_withdrawals" }],
-    [{ text: "👛 Balance Management", callback_data: "admin_balance_manage" }, { text: "📦 Backup", callback_data: "admin_backup" }],
-    [{ text: "🚪 Logout", callback_data: "admin_logout" }]
+    [
+      { text: "📊 Stock Report", callback_data: "admin_stock" },
+      { text: "👥 User Stats", callback_data: "admin_users" }
+    ],
+    [
+      { text: "📢 Broadcast", callback_data: "admin_broadcast" },
+      { text: "📋 OTP Log", callback_data: "admin_otp_log" }
+    ],
+    [
+      { text: "➕ Add Numbers", callback_data: "admin_add_numbers" },
+      { text: "📤 Upload File", callback_data: "admin_upload" }
+    ],
+    [
+      { text: "🗑️ Delete Numbers", callback_data: "admin_delete" },
+      { text: "🔧 Manage Services", callback_data: "admin_manage_services" }
+    ],
+    [
+      { text: "🌍 Manage Countries", callback_data: "admin_manage_countries" },
+      { text: "⚙️ Settings", callback_data: "admin_settings" }
+    ],
+    [
+      { text: "💰 Country Prices", callback_data: "admin_country_prices" },
+      { text: "💸 Withdrawals", callback_data: "admin_withdrawals" }
+    ],
+    [
+      { text: "👛 Balance Management", callback_data: "admin_balance_manage" },
+      { text: "📦 Backup", callback_data: "admin_backup" }
+    ]
   ];
-  await ctx.editMessageText("🛠 *Admin Dashboard*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: buttons } });
+
+  buttons.push([
+    { text: "🚪 Logout", callback_data: "admin_logout" }
+  ]);
+
+  await ctx.editMessageText(
+    "🛠 *Admin Dashboard*\n\n" +
+    "Select an option:",
+    {
+      parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: buttons }
+    }
+  );
 });
 
+/******************** ADMIN CANCEL ********************/
 bot.action("admin_cancel", async (ctx) => {
   await ctx.answerCbQuery();
   ctx.session.adminState = null;
   ctx.session.adminData = null;
-  await ctx.editMessageText("❌ *Cancelled*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_back" }]] } });
+
+  await ctx.editMessageText(
+    "❌ *Action Cancelled*\n\n" +
+    "Returning to admin panel...",
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🛠 Back to Admin", callback_data: "admin_back" }]
+        ]
+      }
+    }
+  );
 });
 
+/******************** ADMIN LOGOUT ********************/
 bot.action("admin_logout", async (ctx) => {
   await ctx.answerCbQuery();
   ctx.session.isAdmin = false;
-  await ctx.editMessageText("🚪 *Logged Out*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Main Menu", callback_data: "back_to_services" }]] } });
+  ctx.session.adminState = null;
+  ctx.session.adminData = null;
+
+  await ctx.editMessageText(
+    "🚪 *Admin Logged Out*\n\n" +
+    "You have been logged out from admin panel.",
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔙 Back to Main Menu", callback_data: "back_to_services" }]
+        ]
+      }
+    }
+  );
 });
 
 /******************** ADMIN STOCK REPORT ********************/
 bot.action("admin_stock", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  let report = "📊 *Stock Report*\n\n";
-  let total = 0;
-  for (const cc in numbersByCountryService) {
-    const country = countries[cc];
-    report += `\n${country?.flag || '🌍'} ${country?.name || cc} (+${cc}):\n`;
-    let ct = 0;
-    for (const sid in numbersByCountryService[cc]) {
-      const count = numbersByCountryService[cc][sid].length;
-      if (count > 0) { report += `  ${services[sid]?.icon || '📞'} ${services[sid]?.name || sid}: *${count}*\n`; ct += count; }
+
+  try {
+    let report = "📊 *Stock Report*\n\n";
+    let totalNumbers = 0;
+
+    for (const countryCode in numbersByCountryService) {
+      const country = countries[countryCode];
+      const countryName = country ? `${country.flag} ${country.name}` : `Country ${countryCode}`;
+
+      report += `\n${countryName} (+${countryCode}):\n`;
+
+      let countryTotal = 0;
+
+      for (const serviceId in numbersByCountryService[countryCode]) {
+        const service = services[serviceId];
+        const serviceName = service ? `${service.icon} ${service.name}` : serviceId;
+        const count = numbersByCountryService[countryCode][serviceId].length;
+
+        if (count > 0) {
+          report += `  ${serviceName}: *${count}*\n`;
+          countryTotal += count;
+        }
+      }
+
+      report += `  *Total:* ${countryTotal}\n`;
+      totalNumbers += countryTotal;
     }
-    report += `  *Total:* ${ct}\n`;
-    total += ct;
+
+    report += `\n📈 *Grand Total:* ${totalNumbers} numbers\n`;
+    report += `👥 *Active Users:* ${Object.keys(activeNumbers).length}\n`;
+    report += `📨 *OTPs Forwarded:* ${otpLog.length}`;
+
+    if (report.length > 4000) {
+      report = report.substring(0, 3950) + '\n\n_...truncated_';
+    }
+
+    await ctx.editMessageText(report, {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔄 Refresh", callback_data: "admin_stock" }],
+          [{ text: "🔙 Back", callback_data: "admin_back" }]
+        ]
+      }
+    });
+  } catch(error) {
+    console.error("Stock report error:", error.message);
+    if (error.message?.includes("message is not modified")) return;
+    try {
+      await ctx.editMessageText("❌ Error loading stock report. Please try again.", {
+        reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_back" }]] }
+      });
+    } catch(e) {}
   }
-  report += `\n📈 *Grand Total:* ${total}\n👥 *Active:* ${Object.keys(activeNumbers).length}\n📨 *OTPs:* ${otpLog.length}`;
-  await ctx.editMessageText(report, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔄 Refresh", callback_data: "admin_stock" }], [{ text: "🔙 Back", callback_data: "admin_back" }]] } });
 });
 
 /******************** ADMIN USER STATS ********************/
 bot.action("admin_users", async (ctx) => {
-  if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
+  if (!ctx.session.isAdmin) {
+    await ctx.answerCbQuery("❌ Admin only");
+    return;
+  }
   await ctx.answerCbQuery();
-  let text = `👥 *User Stats*\n\n📊 Total: ${Object.keys(users).length}\n📱 Active: ${Object.keys(activeNumbers).length}\n📨 OTPs: ${otpLog.length}\n\n📋 *Recent Users:*\n`;
-  const recent = Object.values(users).sort((a,b) => new Date(b.last_active) - new Date(a.last_active)).slice(0, 10);
-  recent.forEach(u => { text += `\n👤 ${u.first_name}\n🆔 \`${u.id}\`\n🕐 ${getTimeAgo(new Date(u.last_active))}\n`; });
-  await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔄 Refresh", callback_data: "admin_users" }], [{ text: "🔙 Back", callback_data: "admin_back" }]] } });
+
+  try {
+    const totalUsers = Object.keys(users).length;
+    const activeUsers = Object.keys(activeNumbers).length;
+
+    const esc = (str) => String(str || '').replace(/[_*`\[]/g, '\\$&');
+
+    let message = "👥 *User Statistics*\n\n";
+    message += `📊 *Statistics:*\n`;
+    message += `• Total Registered Users: ${totalUsers}\n`;
+    message += `• Active Users (with numbers): ${activeUsers}\n`;
+    message += `• Total OTPs Delivered: ${otpLog.length}\n\n`;
+
+    if (totalUsers > 0) {
+      message += `📋 *Recent Users (last 10):*\n`;
+
+      const sortedUsers = Object.values(users)
+        .sort((a, b) => new Date(b.last_active) - new Date(a.last_active))
+        .slice(0, 10);
+
+      for (const user of sortedUsers) {
+        const timeAgo = getTimeAgo(new Date(user.last_active));
+        const name = esc(user.first_name) + (user.last_name ? ' ' + esc(user.last_name) : '');
+        const username = esc(user.username || 'no_username');
+        message += `\n👤 *${name}*\n`;
+        message += `🆔 ID: \`${user.id}\`\n`;
+        message += `📱 @${username}\n`;
+        message += `🕐 Active: ${timeAgo}\n`;
+      }
+    } else {
+      message += `📭 No users yet`;
+    }
+
+    if (message.length > 4000) {
+      message = message.substring(0, 3950) + '\n\n_...truncated_';
+    }
+
+    await ctx.editMessageText(message, {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔄 Refresh", callback_data: "admin_users" }],
+          [{ text: "🔙 Back", callback_data: "admin_back" }]
+        ]
+      }
+    });
+  } catch (error) {
+    console.error("Admin users error:", error.message);
+    if (error.message?.includes('message is not modified')) return;
+    try {
+      await ctx.editMessageText(`❌ Error: ${error.message}`, {
+        reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_back" }]] }
+      });
+    } catch(e) {}
+  }
 });
 
 /******************** ADMIN OTP LOG ********************/
 bot.action("admin_otp_log", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  let text = "📋 *Recent OTPs*\n\n";
-  otpLog.slice(-10).reverse().forEach(log => { text += `📞 \`${log.phoneNumber}\` → \`${log.userId}\`\n🕐 ${getTimeAgo(new Date(log.timestamp))}\n\n`; });
-  await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔄 Refresh", callback_data: "admin_otp_log" }], [{ text: "🔙 Back", callback_data: "admin_back" }]] } });
+
+  try {
+    let message = "📋 *Recent OTP Logs*\n\n";
+
+    if (otpLog.length === 0) {
+      message += "No OTPs forwarded yet.";
+    } else {
+      const recentLogs = otpLog.slice(-10).reverse();
+      for (const log of recentLogs) {
+        const timeAgo = getTimeAgo(new Date(log.timestamp));
+        message += `📞 \`${log.phoneNumber}\` → 👤 \`${log.userId}\`\n`;
+        message += `🕐 ${timeAgo}\n\n`;
+      }
+    }
+
+    if (message.length > 4000) message = message.substring(0, 3950) + '\n\n_...truncated_';
+
+    await ctx.editMessageText(message, {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔄 Refresh", callback_data: "admin_otp_log" }],
+          [{ text: "🔙 Back", callback_data: "admin_back" }]
+        ]
+      }
+    });
+  } catch(error) {
+    console.error("OTP log error:", error.message);
+    if (error.message?.includes("message is not modified")) return;
+    try {
+      await ctx.editMessageText("❌ Error loading OTP log.", {
+        reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_back" }]] }
+      });
+    } catch(e) {}
+  }
 });
 
 /******************** ADMIN BROADCAST ********************/
 bot.action("admin_broadcast", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
+
   ctx.session.adminState = "waiting_broadcast";
-  await ctx.editMessageText("📢 *Broadcast*\n\nSend your message:", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } });
+
+  await ctx.editMessageText(
+    "📢 *Broadcast Message*\n\n" +
+    "Send the message you want to broadcast to all users.\n\n" +
+    "*Note:* This will be sent to all registered users.",
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "❌ Cancel", callback_data: "admin_cancel" }]
+        ]
+      }
+    }
+  );
 });
 
 /******************** ADMIN ADD NUMBERS ********************/
 bot.action("admin_add_numbers", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
+
   ctx.session.adminState = "waiting_add_numbers";
-  await ctx.editMessageText("➕ *Add Numbers*\n\nFormat: `number|country|service`\nExample: `8801712345678|880|whatsapp`", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } });
+
+  await ctx.editMessageText(
+    "➕ *Add Numbers Manually*\n\n" +
+    "Send numbers in format:\n`[number]|[country code]|[service]`\n\n" +
+    "*Examples:*\n" +
+    "`8801712345678|880|whatsapp`\n" +
+    "`919876543210|91|telegram`\n" +
+    "`11234567890|1|facebook`\n\n" +
+    "You can send multiple numbers in one message.",
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "❌ Cancel", callback_data: "admin_cancel" }]
+        ]
+      }
+    }
+  );
 });
 
 /******************** ADMIN UPLOAD FILE ********************/
 bot.action("admin_upload", async (ctx) => {
-  if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
-  await ctx.answerCbQuery();
-  ctx.session.adminState = "waiting_upload";
-  const btns = [];
-  for (const sid in services) btns.push([{ text: `${services[sid].icon} ${services[sid].name}`, callback_data: `admin_select_service:${sid}` }]);
-  btns.push([{ text: "❌ Cancel", callback_data: "admin_cancel" }]);
-  await ctx.editMessageText("📤 *Upload Numbers*\n\nSelect service:", { parse_mode: "Markdown", reply_markup: { inline_keyboard: btns } });
+  try {
+    if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
+    await ctx.answerCbQuery();
+
+    ctx.session.adminState = "waiting_upload";
+    ctx.session.adminData = null;
+
+    const serviceButtons = [];
+    for (const serviceId in services) {
+      const service = services[serviceId];
+      serviceButtons.push([
+        { 
+          text: `${service.icon} ${service.name}`, 
+          callback_data: `admin_select_service:${serviceId}` 
+        }
+      ]);
+    }
+
+    serviceButtons.push([{ text: "❌ Cancel", callback_data: "admin_cancel" }]);
+
+    await ctx.editMessageText(
+      "📤 *Upload Numbers*\n\n" +
+      "Select service for the numbers:",
+      {
+        parse_mode: "Markdown",
+        reply_markup: { inline_keyboard: serviceButtons }
+      }
+    );
+  } catch (error) {
+    console.error("Admin upload error:", error);
+    try { await ctx.reply("❌ Error. Please try again."); } catch(e) {}
+  }
 });
 
 bot.action(/^admin_select_service:(.+)$/, async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
+
+  const serviceId = ctx.match[1];
+  const service = services[serviceId];
+
   ctx.session.adminState = "waiting_upload_file";
-  ctx.session.adminData = { serviceId: ctx.match[1] };
-  await ctx.editMessageText(`📤 *Upload for ${services[ctx.match[1]]?.name}*\n\nSend .txt file with numbers (one per line):`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } });
+  ctx.session.adminData = { serviceId };
+
+  await ctx.editMessageText(
+    `📤 *Upload Numbers for ${service.name}*\n\n` +
+    "Send a .txt file with phone numbers.\n\n" +
+    "*Format (one per line):*\n" +
+    "1. Just number: `8801712345678`\n" +
+    "2. With country: `8801712345678|880`\n" +
+    "3. With country and service: `8801712345678|880|${serviceId}`\n\n" +
+    "*Note:* Country code will be auto-detected if not provided.\n" +
+    "*Supported:* .txt files only",
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "❌ Cancel", callback_data: "admin_cancel" }]
+        ]
+      }
+    }
+  );
 });
 
 /******************** ADMIN MANAGE SERVICES ********************/
 bot.action("admin_manage_services", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  await ctx.editMessageText("🔧 *Manage Services*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "📋 List", callback_data: "admin_list_services" }, { text: "➕ Add", callback_data: "admin_add_service" }], [{ text: "🗑️ Delete", callback_data: "admin_delete_service" }], [{ text: "🔙 Back", callback_data: "admin_back" }]] } });
+
+  await ctx.editMessageText(
+    "🔧 *Manage Services*\n\n" +
+    "Select an option:",
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "📋 List Services", callback_data: "admin_list_services" },
+            { text: "➕ Add Service", callback_data: "admin_add_service" }
+          ],
+          [
+            { text: "🗑️ Delete Service", callback_data: "admin_delete_service" }
+          ],
+          [{ text: "🔙 Back", callback_data: "admin_back" }]
+        ]
+      }
+    }
+  );
 });
 
+/******************** ADMIN LIST SERVICES ********************/
 bot.action("admin_list_services", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  let text = "📋 *Services*\n\n";
-  for (const sid in services) text += `${services[sid].icon} *${services[sid].name}* \`${sid}\`\n`;
-  await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_manage_services" }]] } });
+
+  let report = "📋 *Services List*\n\n";
+
+  for (const serviceId in services) {
+    const service = services[serviceId];
+    report += `• ${service.icon} *${service.name}* (ID: \`${serviceId}\`)\n`;
+  }
+
+  await ctx.editMessageText(report, {
+    parse_mode: "Markdown",
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "🔙 Back", callback_data: "admin_back" }]
+      ]
+    }
+  });
 });
 
+/******************** ADMIN ADD SERVICE ********************/
 bot.action("admin_add_service", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
+
   ctx.session.adminState = "waiting_add_service";
-  await ctx.editMessageText("➕ *Add Service*\n\nFormat: `id name icon`\nExample: `gmail Gmail 📧`", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } });
+
+  await ctx.editMessageText(
+    "🔧 *Add New Service*\n\n" +
+    "Send in format:\n`[service_id] [name] [icon]`\n\n" +
+    "*Examples:*\n" +
+    "`facebook Facebook 📘`\n" +
+    "`gmail Gmail 📧`\n" +
+    "`instagram Instagram 📸`\n\n" +
+    "Service ID should be lowercase without spaces.",
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "❌ Cancel", callback_data: "admin_cancel" }]
+        ]
+      }
+    }
+  );
 });
 
+/******************** ADMIN DELETE SERVICE ********************/
 bot.action("admin_delete_service", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  const btns = [];
-  for (const sid in services) btns.push([{ text: `${services[sid].icon} ${services[sid].name}`, callback_data: `admin_delete_service_confirm:${sid}` }]);
-  btns.push([{ text: "❌ Cancel", callback_data: "admin_back" }]);
-  await ctx.editMessageText("🗑️ *Delete Service*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: btns } });
+
+  const serviceButtons = [];
+  for (const serviceId in services) {
+    const service = services[serviceId];
+    serviceButtons.push([
+      { 
+        text: `${service.icon} ${service.name}`, 
+        callback_data: `admin_delete_service_confirm:${serviceId}` 
+      }
+    ]);
+  }
+
+  serviceButtons.push([{ text: "❌ Cancel", callback_data: "admin_back" }]);
+
+  await ctx.editMessageText(
+    "🗑️ *Delete Service*\n\n" +
+    "Select service to delete:",
+    {
+      parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: serviceButtons }
+    }
+  );
 });
 
 bot.action(/^admin_delete_service_confirm:(.+)$/, async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  const sid = ctx.match[1];
-  await ctx.editMessageText(`⚠️ *Delete ${services[sid]?.name}?*\n\nThis will delete all numbers for this service!`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "✅ Yes", callback_data: `admin_delete_service_execute:${sid}` }, { text: "❌ No", callback_data: "admin_manage_services" }]] } });
+
+  const serviceId = ctx.match[1];
+  const service = services[serviceId];
+
+  await ctx.editMessageText(
+    `⚠️ *Confirm Deletion*\n\n` +
+    `Are you sure you want to delete service *${service.name}*?\n\n` +
+    `This will also delete all numbers assigned to this service!`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "✅ Yes, Delete", callback_data: `admin_delete_service_execute:${serviceId}` },
+            { text: "❌ Cancel", callback_data: "admin_back" }
+          ]
+        ]
+      }
+    }
+  );
 });
 
 bot.action(/^admin_delete_service_execute:(.+)$/, async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  const sid = ctx.match[1];
-  for (const cc in numbersByCountryService) if (numbersByCountryService[cc][sid]) delete numbersByCountryService[cc][sid];
-  delete services[sid];
-  saveNumbers(); saveServices();
-  await ctx.editMessageText(`✅ *Service Deleted*`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_manage_services" }]] } });
+
+  const serviceId = ctx.match[1];
+
+  for (const countryCode in numbersByCountryService) {
+    if (numbersByCountryService[countryCode][serviceId]) {
+      delete numbersByCountryService[countryCode][serviceId];
+    }
+  }
+
+  delete services[serviceId];
+
+  saveNumbers();
+  saveServices();
+
+  await ctx.editMessageText(
+    `✅ *Service Deleted Successfully!*\n\n` +
+    `Service has been removed.`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔙 Back to Admin", callback_data: "admin_back" }]
+        ]
+      }
+    }
+  );
 });
 
 /******************** ADMIN MANAGE COUNTRIES ********************/
 bot.action("admin_manage_countries", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  await ctx.editMessageText("🌍 *Manage Countries*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "➕ Add", callback_data: "admin_add_country" }, { text: "📋 List", callback_data: "admin_list_countries" }], [{ text: "🔙 Back", callback_data: "admin_back" }]] } });
+
+  let countryList = "🌍 *Manage Countries*\n\n";
+  countryList += `📊 Total Countries: *${Object.keys(countries).length}*\n\n`;
+
+  await ctx.editMessageText(countryList, {
+    parse_mode: "Markdown",
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "➕ Add Country", callback_data: "admin_add_country" },
+          { text: "📋 List Countries", callback_data: "admin_list_countries" }
+        ],
+        [{ text: "🔙 Back", callback_data: "admin_back" }]
+      ]
+    }
+  });
 });
 
+/******************** ADMIN LIST COUNTRIES ********************/
 bot.action("admin_list_countries", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  let text = "🌍 *Countries*\n\n";
-  for (const cc in countries) text += `${countries[cc].flag} *${countries[cc].name}* (+${cc})\n`;
-  await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_manage_countries" }]] } });
+  let text = "🌍 *Country List*\n\n";
+  for (const cc in countries) {
+    const c = countries[cc];
+    const price = countryPrices[cc] !== undefined ? countryPrices[cc] : (settings.defaultOtpPrice || 0.25);
+    text += `${c.flag} *${c.name}* (+${cc}) — ${price.toFixed(2)} TK/OTP\n`;
+  }
+  await ctx.editMessageText(text, {
+    parse_mode: "Markdown",
+    reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_manage_countries" }]] }
+  });
 });
 
+/******************** ADMIN ADD COUNTRY ********************/
 bot.action("admin_add_country", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
+
   ctx.session.adminState = "waiting_add_country";
-  await ctx.editMessageText("➕ *Add Country*\n\nFormat: `code name flag`\nExample: `880 Bangladesh 🇧🇩`", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } });
+
+  await ctx.editMessageText(
+    "🌍 *Add New Country*\n\n" +
+    "Send in format:\n`[countryCode] [name] [flag]`\n\n" +
+    "*Examples:*\n" +
+    "`880 Bangladesh 🇧🇩`\n" +
+    "`91 India 🇮🇳`\n" +
+    "`1 USA 🇺🇸`\n\n" +
+    "Note: Country code is dialing code (without +).",
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "❌ Cancel", callback_data: "admin_cancel" }]
+        ]
+      }
+    }
+  );
 });
 
 /******************** ADMIN SETTINGS ********************/
 bot.action("admin_settings", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  await ctx.editMessageText(`⚙️ *Settings*\n\n📞 Numbers: ${settings.defaultNumberCount}\n⏱ Cooldown: ${settings.cooldownSeconds}s\n🔐 Verification: ${settings.requireVerification ? "ON" : "OFF"}\n💵 Price: ${(settings.defaultOtpPrice || 0.25).toFixed(2)} TK\n💸 Min Withdraw: ${settings.minWithdraw} TK\n🏧 Withdraw: ${settings.withdrawEnabled ? "ON" : "OFF"}`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "📞 Count", callback_data: "admin_set_count" }, { text: "⏱ Cooldown", callback_data: "admin_set_cooldown" }], [{ text: `🔐 ${settings.requireVerification ? "Disable" : "Enable"}`, callback_data: "admin_toggle_verification" }], [{ text: "💵 Price", callback_data: "admin_set_default_price" }, { text: "💸 Min Withdraw", callback_data: "admin_set_min_withdraw" }], [{ text: `🏧 ${settings.withdrawEnabled ? "Disable" : "Enable"}`, callback_data: "admin_toggle_withdraw" }], [{ text: "🔙 Back", callback_data: "admin_back" }]] } });
+
+  await ctx.editMessageText(
+    "⚙️ *Bot Settings*\n\n" +
+    `📞 Number Count: *${settings.defaultNumberCount}*\n` +
+    `⏱ Cooldown: *${settings.cooldownSeconds} seconds*\n` +
+    `🔐 Verification: *${settings.requireVerification ? "Enabled ✅" : "Disabled ❌"}*\n` +
+    `💵 OTP Price (default): *${(settings.defaultOtpPrice || 0.25).toFixed(2)} taka*\n` +
+    `💸 Min Withdraw: *${settings.minWithdraw} taka*\n` +
+    `🏧 Withdraw: *${settings.withdrawEnabled ? "Enabled ✅" : "Disabled ❌"}*\n\n` +
+    "Press a button to change settings:",
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "📞 Number Count", callback_data: "admin_set_count" },
+            { text: "⏱ Cooldown", callback_data: "admin_set_cooldown" }
+          ],
+          [
+            { text: `🔐 Verification ${settings.requireVerification ? "Disable" : "Enable"}`, callback_data: "admin_toggle_verification" }
+          ],
+          [
+            { text: "💵 Set OTP Price", callback_data: "admin_set_default_price" },
+            { text: "💸 Set Min Withdraw", callback_data: "admin_set_min_withdraw" }
+          ],
+          [
+            { text: `🏧 Withdraw ${settings.withdrawEnabled ? "🔴 Disable" : "🟢 Enable"}`, callback_data: "admin_toggle_withdraw" }
+          ],
+          [
+            { text: "🔙 Back", callback_data: "admin_back" }
+          ]
+        ]
+      }
+    }
+  );
 });
 
 bot.action("admin_set_count", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
+
   ctx.session.adminState = "waiting_set_count";
-  await ctx.editMessageText(`📞 *Set Number Count*\n\nCurrent: ${settings.defaultNumberCount}\nSend new count (1-100):`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } });
+
+  await ctx.editMessageText(
+    `📞 *Set Number Count*\n\n` +
+    `Current count: *${settings.defaultNumberCount}*\n\n` +
+    `Send the new number count (1-100):`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "❌ Cancel", callback_data: "admin_cancel" }]
+        ]
+      }
+    }
+  );
 });
 
 bot.action("admin_set_cooldown", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
+
   ctx.session.adminState = "waiting_set_cooldown";
-  await ctx.editMessageText(`⏱ *Set Cooldown*\n\nCurrent: ${settings.cooldownSeconds}s\nSend new cooldown (1-3600):`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } });
+
+  await ctx.editMessageText(
+    `⏱ *Set Cooldown*\n\n` +
+    `Current cooldown: *${settings.cooldownSeconds} seconds*\n\n` +
+    `Send the new cooldown in seconds (1-3600):`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "❌ Cancel", callback_data: "admin_cancel" }]
+        ]
+      }
+    }
+  );
 });
 
 bot.action("admin_toggle_verification", async (ctx) => {
@@ -1953,238 +3217,843 @@ bot.action("admin_toggle_verification", async (ctx) => {
   settings.requireVerification = !settings.requireVerification;
   saveSettings();
   await ctx.answerCbQuery(`✅ Verification ${settings.requireVerification ? "Enabled" : "Disabled"}`);
-  await ctx.editMessageText(`⚙️ *Settings*\n\n🔐 Verification: ${settings.requireVerification ? "ON" : "OFF"}`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_settings" }]] } });
+  await ctx.editMessageText(
+    "⚙️ *Bot Settings*\n\n" +
+    `📞 Number Count: *${settings.defaultNumberCount}*\n` +
+    `⏱ Cooldown: *${settings.cooldownSeconds} seconds*\n` +
+    `🔐 Verification: *${settings.requireVerification ? "Enabled ✅" : "Disabled ❌"}*\n` +
+    `💵 OTP Price (default): *${(settings.defaultOtpPrice || 0.25).toFixed(2)} taka*\n` +
+    `💸 Min Withdraw: *${settings.minWithdraw} taka*\n` +
+    `🏧 Withdraw: *${settings.withdrawEnabled ? "Enabled ✅" : "Disabled ❌"}*\n\n` +
+    "Press a button to change settings:",
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "📞 Number Count", callback_data: "admin_set_count" },
+            { text: "⏱ Cooldown", callback_data: "admin_set_cooldown" }
+          ],
+          [
+            { text: `🔐 Verification ${settings.requireVerification ? "Disable" : "Enable"}`, callback_data: "admin_toggle_verification" }
+          ],
+          [
+            { text: "💵 Set OTP Price", callback_data: "admin_set_default_price" },
+            { text: "💸 Set Min Withdraw", callback_data: "admin_set_min_withdraw" }
+          ],
+          [
+            { text: `🏧 Withdraw ${settings.withdrawEnabled ? "🔴 Disable" : "🟢 Enable"}`, callback_data: "admin_toggle_withdraw" }
+          ],
+          [
+            { text: "🔙 Back", callback_data: "admin_back" }
+          ]
+        ]
+      }
+    }
+  );
 });
 
 bot.action("admin_set_default_price", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
+  await ctx.answerCbQuery();
   ctx.session.adminState = "waiting_set_default_price";
-  await ctx.editMessageText(`💵 *Set Default Price*\n\nCurrent: ${(settings.defaultOtpPrice || 0.25).toFixed(2)} TK\nSend new price:`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } });
+  await ctx.editMessageText(
+    `💵 *Set Default OTP Price*\n\nCurrent: *${(settings.defaultOtpPrice || 0.25).toFixed(2)} taka*\n\nSend new amount (e.g. \`0.50\`):`,
+    { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } }
+  );
 });
 
 bot.action("admin_set_min_withdraw", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
+  await ctx.answerCbQuery();
   ctx.session.adminState = "waiting_set_min_withdraw";
-  await ctx.editMessageText(`💸 *Set Min Withdraw*\n\nCurrent: ${settings.minWithdraw} TK\nSend new amount:`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } });
+  await ctx.editMessageText(
+    `💸 *Set Min Withdraw*\n\nCurrent: *${settings.minWithdraw} taka*\n\nSend new amount (e.g. \`50\`):`,
+    { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } }
+  );
 });
 
 bot.action("admin_toggle_withdraw", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   settings.withdrawEnabled = !settings.withdrawEnabled;
   saveSettings();
-  await ctx.answerCbQuery(`✅ Withdraw ${settings.withdrawEnabled ? "Enabled" : "Disabled"}`);
-  await ctx.editMessageText(`⚙️ *Settings*\n\n🏧 Withdraw: ${settings.withdrawEnabled ? "ON" : "OFF"}`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_settings" }]] } });
+  await ctx.answerCbQuery(`${settings.withdrawEnabled ? "✅ Withdraw Enabled" : "❌ Withdraw Disabled"}`);
+  await ctx.editMessageText(
+    "⚙️ *Bot Settings*\n\n" +
+    `📞 Number Count: *${settings.defaultNumberCount}*\n` +
+    `⏱ Cooldown: *${settings.cooldownSeconds} seconds*\n` +
+    `🔐 Verification: *${settings.requireVerification ? "Enabled ✅" : "Disabled ❌"}*\n` +
+    `💵 OTP Price (default): *${(settings.defaultOtpPrice || 0.25).toFixed(2)} taka*\n` +
+    `💸 Min Withdraw: *${settings.minWithdraw} taka*\n` +
+    `🏧 Withdraw: *${settings.withdrawEnabled ? "Enabled ✅" : "Disabled ❌"}*\n\n` +
+    "Press a button to change settings:",
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "📞 Number Count", callback_data: "admin_set_count" },
+            { text: "⏱ Cooldown", callback_data: "admin_set_cooldown" }
+          ],
+          [
+            { text: `🔐 Verification ${settings.requireVerification ? "Disable" : "Enable"}`, callback_data: "admin_toggle_verification" }
+          ],
+          [
+            { text: "💵 Set OTP Price", callback_data: "admin_set_default_price" },
+            { text: "💸 Set Min Withdraw", callback_data: "admin_set_min_withdraw" }
+          ],
+          [
+            { text: `🏧 Withdraw ${settings.withdrawEnabled ? "🔴 Disable" : "🟢 Enable"}`, callback_data: "admin_toggle_withdraw" }
+          ],
+          [
+            { text: "🔙 Back", callback_data: "admin_back" }
+          ]
+        ]
+      }
+    }
+  );
 });
 
 /******************** ADMIN COUNTRY PRICES ********************/
 bot.action("admin_country_prices", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  let text = "💰 *Country Prices*\n\n📌 Default: ${(settings.defaultOtpPrice || 0.25).toFixed(2)} TK\n\n";
-  for (const cc in countries) { const price = countryPrices[cc] !== undefined ? countryPrices[cc] : (settings.defaultOtpPrice || 0.25); text += `${countries[cc].flag} ${countries[cc].name}: *${price.toFixed(2)} TK*\n`; }
-  await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "✏️ Set", callback_data: "admin_set_country_price" }, { text: "🔄 Reset", callback_data: "admin_reset_prices" }], [{ text: "🔙 Back", callback_data: "admin_back" }]] } });
+
+  let text = "💰 *Country OTP Prices*\n\n";
+  text += `📌 *Default Price:* ${(settings.defaultOtpPrice || 0.25).toFixed(2)} taka/OTP\n\n`;
+  text += "*Price per Country:*\n";
+
+  for (const cc in countries) {
+    const price = countryPrices[cc] !== undefined ? countryPrices[cc] : (settings.defaultOtpPrice || 0.25);
+    const custom = countryPrices[cc] !== undefined ? " ✏️" : "";
+    text += `${countries[cc].flag} ${countries[cc].name} (+${cc}): *${price.toFixed(2)} TK*${custom}\n`;
+  }
+
+  await ctx.editMessageText(text, {
+    parse_mode: "Markdown",
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "✏️ Set Country Price", callback_data: "admin_set_country_price" }],
+        [{ text: "🔄 Reset All to Default", callback_data: "admin_reset_prices" }],
+        [{ text: "🔙 Back", callback_data: "admin_back" }]
+      ]
+    }
+  });
 });
 
 bot.action("admin_set_country_price", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
+  await ctx.answerCbQuery();
+
   ctx.session.adminState = "waiting_set_country_price";
-  await ctx.editMessageText("✏️ *Set Country Price*\n\nFormat: `code price`\nExample: `880 0.50`", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } });
+
+  await ctx.editMessageText(
+    "✏️ *Set Country Price*\n\n" +
+    "Format: `[country_code] [price]`\n\n" +
+    "*Example:*\n" +
+    "`880 0.50` → Bangladesh = 0.50 taka\n" +
+    "`91 0.25` → India = 0.25 taka\n" +
+    "`1 0.75` → USA = 0.75 taka\n\n" +
+    "You can set multiple countries in one message (one per line):",
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]]
+      }
+    }
+  );
 });
 
 bot.action("admin_reset_prices", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   countryPrices = {};
   saveCountryPrices();
-  await ctx.answerCbQuery("✅ Reset");
-  await ctx.editMessageText("✅ *All prices reset*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_country_prices" }]] } });
+  await ctx.answerCbQuery("✅ All prices reset!");
+  await ctx.editMessageText(
+    `✅ *All Country Prices Reset.*\n\nAll countries now use default price (${(settings.defaultOtpPrice || 0.25).toFixed(2)} taka).`,
+    { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_country_prices" }]] } }
+  );
 });
 
 /******************** ADMIN BALANCE MANAGEMENT ********************/
 bot.action("admin_balance_manage", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
+
+  const topUsers = Object.entries(earnings)
+    .sort(([,a],[,b]) => b.totalEarned - a.totalEarned)
+    .slice(0, 10);
+
+  let text = "💰 *User Balance Management*\n\n";
+  text += `👥 *Total Users with earnings:* ${Object.keys(earnings).length}\n`;
   const totalBalance = Object.values(earnings).reduce((s, e) => s + e.balance, 0);
   const totalEarned = Object.values(earnings).reduce((s, e) => s + e.totalEarned, 0);
-  let text = `💰 *Balance Management*\n\n💵 Total Balance: ${totalBalance.toFixed(2)} TK\n📈 Total Earned: ${totalEarned.toFixed(2)} TK\n👥 Users: ${Object.keys(earnings).length}\n\n`;
-  const top = Object.entries(earnings).sort(([,a],[,b]) => b.totalEarned - a.totalEarned).slice(0, 5);
-  top.forEach(([uid, e], i) => { const u = users[uid]; text += `${i+1}. ${u?.first_name || uid}: ${e.totalEarned.toFixed(2)} TK\n`; });
-  await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "➕ Add", callback_data: "admin_add_balance" }, { text: "➖ Deduct", callback_data: "admin_deduct_balance" }], [{ text: "🔄 Reset", callback_data: "admin_reset_balance" }], [{ text: "🔙 Back", callback_data: "admin_back" }]] } });
+  text += `💵 *Total Pending Balance:* ${totalBalance.toFixed(2)} taka\n`;
+  text += `📈 *Total Ever Earned:* ${totalEarned.toFixed(2)} taka\n\n`;
+
+  if (topUsers.length > 0) {
+    text += "*🏆 Top Earners:*\n";
+    topUsers.forEach(([uid, e], i) => {
+      const user = users[uid];
+      const name = user ? user.first_name : uid;
+      text += `${i+1}. ${name} — ${e.totalEarned.toFixed(2)}TK (Balance: ${e.balance.toFixed(2)}TK)\n`;
+    });
+  }
+
+  await ctx.editMessageText(text, {
+    parse_mode: "Markdown",
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "➕ Add User Balance", callback_data: "admin_add_balance" }],
+        [{ text: "➖ Deduct User Balance", callback_data: "admin_deduct_balance" }],
+        [{ text: "🔄 Reset User Balance", callback_data: "admin_reset_balance" }],
+        [{ text: "🔙 Back", callback_data: "admin_back" }]
+      ]
+    }
+  });
 });
 
 bot.action("admin_add_balance", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
+  await ctx.answerCbQuery();
   ctx.session.adminState = "waiting_add_balance";
-  await ctx.editMessageText("➕ *Add Balance*\n\nFormat: `user_id amount`\nExample: `123456789 50`", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } });
+  await ctx.editMessageText(
+    "➕ *Add User Balance*\n\n" +
+    "Format: `[user_id] [amount]`\n\n" +
+    "Example: `123456789 50`\n\n" +
+    "Find User ID via /admin → User Stats:",
+    { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } }
+  );
 });
 
 bot.action("admin_deduct_balance", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
+  await ctx.answerCbQuery();
   ctx.session.adminState = "waiting_deduct_balance";
-  await ctx.editMessageText("➖ *Deduct Balance*\n\nFormat: `user_id amount`", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } });
+  await ctx.editMessageText(
+    "➖ *Deduct User Balance*\n\n" +
+    "Format: `[user_id] [amount]`\n\n" +
+    "Example: `123456789 25`",
+    { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } }
+  );
 });
 
 bot.action("admin_reset_balance", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
+  await ctx.answerCbQuery();
   ctx.session.adminState = "waiting_reset_balance";
-  await ctx.editMessageText("🔄 *Reset Balance*\n\nSend user_id:", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } });
+  await ctx.editMessageText(
+    "🔄 *Reset User Balance*\n\n" +
+    "Send the User ID (balance will be set to 0):\n\n" +
+    "Example: `123456789`",
+    { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_cancel" }]] } }
+  );
 });
 
 /******************** ADMIN WITHDRAWALS ********************/
 bot.action("admin_withdrawals", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
+
   const pending = withdrawals.filter(w => w.status === "pending");
   const approved = withdrawals.filter(w => w.status === "approved");
+  const rejected = withdrawals.filter(w => w.status === "rejected");
   const totalApproved = approved.reduce((s, w) => s + w.amount, 0);
-  await ctx.editMessageText(`💸 *Withdrawals*\n\n⏳ Pending: ${pending.length}\n✅ Approved: ${approved.length} (${totalApproved.toFixed(2)} TK)`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "⏳ Pending", callback_data: "admin_pending_withdrawals" }], [{ text: "📋 History", callback_data: "admin_all_withdrawals" }], [{ text: "🔙 Back", callback_data: "admin_back" }]] } });
+
+  let text = `💸 *Withdraw Management*\n\n` +
+    `⏳ Pending: *${pending.length}*\n` +
+    `✅ Approved: *${approved.length}* (${totalApproved.toFixed(2)} taka)\n` +
+    `❌ Rejected: *${rejected.length}*\n\n`;
+
+  const buttons = [[{ text: "⏳ Pending Requests", callback_data: "admin_pending_withdrawals" }]];
+
+  if (pending.length > 0) {
+    text += `⚠️ *${pending.length} pending request(s) waiting!*`;
+  }
+
+  buttons.push([
+    { text: "📋 All History", callback_data: "admin_all_withdrawals" },
+    { text: "🔙 Back", callback_data: "admin_back" }
+  ]);
+
+  await ctx.editMessageText(text, {
+    parse_mode: "Markdown",
+    reply_markup: { inline_keyboard: buttons }
+  });
 });
 
 bot.action("admin_pending_withdrawals", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  const pending = withdrawals.filter(w => w.status === "pending");
-  if (pending.length === 0) return await ctx.editMessageText("✅ *No pending*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_withdrawals" }]] } });
-  let text = "⏳ *Pending Requests*\n\n";
-  const btns = [];
-  pending.forEach(w => { text += `👤 ${w.userName} | 💵 ${w.amount.toFixed(2)} TK | ${w.method}\n📱 ${w.account}\n\n`; btns.push([{ text: `✅ ${w.amount.toFixed(2)} TK`, callback_data: `wadmin_approve:${w.id}` }, { text: "❌ Reject", callback_data: `wadmin_reject:${w.id}` }]); });
-  btns.push([{ text: "🔙 Back", callback_data: "admin_withdrawals" }]);
-  await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: { inline_keyboard: btns } });
+
+  const pending = withdrawals.filter(w => w.status === "pending").slice(-10);
+
+  if (pending.length === 0) {
+    return await ctx.editMessageText("✅ *No pending requests.*", {
+      parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_withdrawals" }]] }
+    });
+  }
+
+  let text = `⏳ *Pending Withdraw Requests (${pending.length}):*\n\n`;
+
+  const buttons = [];
+  pending.forEach((w, i) => {
+    text += `${i + 1}. 👤 ${w.userName} | 💵 ${w.amount.toFixed(2)}TK | ${w.method} | ${w.account}\n`;
+    buttons.push([
+      { text: `✅ ${w.amount.toFixed(2)}TK-${w.method}`, callback_data: `wadmin_approve:${w.id}` },
+      { text: `❌ Reject`, callback_data: `wadmin_reject:${w.id}` }
+    ]);
+  });
+
+  buttons.push([{ text: "🔙 Back", callback_data: "admin_withdrawals" }]);
+
+  await ctx.editMessageText(text, {
+    parse_mode: "Markdown",
+    reply_markup: { inline_keyboard: buttons }
+  });
 });
 
 bot.action("admin_all_withdrawals", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  const recent = withdrawals.slice(-15).reverse();
-  if (recent.length === 0) return await ctx.editMessageText("📋 *No withdrawals*", { parse_mode: "Markdown" });
-  let text = "📋 *Recent Withdrawals*\n\n";
-  recent.forEach(w => { const icon = w.status === "approved" ? "✅" : w.status === "rejected" ? "❌" : "⏳"; text += `${icon} ${w.userName} | ${w.amount.toFixed(2)} TK | ${w.method}\n📅 ${new Date(w.requestedAt).toLocaleDateString()}\n\n`; });
-  await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_withdrawals" }]] } });
+
+  try {
+    const recent = withdrawals.slice(-15).reverse();
+    let text = "📋 *Recent Withdrawals (last 15):*\n\n";
+
+    if (recent.length === 0) {
+      text += "No requests yet.";
+    } else {
+      recent.forEach(w => {
+        const icon = w.status === "approved" ? "✅" : w.status === "rejected" ? "❌" : "⏳";
+        const name = String(w.userName || 'Unknown').replace(/[_*`\[]/g, '\\$&');
+        const date = new Date(w.requestedAt).toLocaleDateString('en-GB');
+        text += `${icon} ${name} | \`${w.amount.toFixed(2)}\`TK | ${w.method} | ${date}\n`;
+      });
+    }
+
+    if (text.length > 4000) text = text.substring(0, 3950) + '\n\n_...truncated_';
+
+    await ctx.editMessageText(text, {
+      parse_mode: "Markdown",
+      reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_withdrawals" }]] }
+    });
+  } catch(error) {
+    console.error("All withdrawals error:", error.message);
+    if (error.message?.includes("message is not modified")) return;
+    try {
+      await ctx.editMessageText("❌ Error loading withdrawals.", {
+        reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_withdrawals" }]] }
+      });
+    } catch(e) {}
+  }
 });
 
 /******************** ADMIN DELETE NUMBERS ********************/
 bot.action("admin_delete", async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  const btns = [];
-  for (const cc in numbersByCountryService) {
-    for (const sid in numbersByCountryService[cc]) {
-      const count = numbersByCountryService[cc][sid].length;
-      if (count > 0) btns.push([{ text: `🗑️ ${cc}/${sid} (${count})`, callback_data: `admin_delete_confirm:${cc}:${sid}` }]);
+
+  let report = "❌ *Delete Numbers*\n\n";
+  report += "Select which numbers to delete:\n\n";
+
+  const buttons = [];
+
+  for (const countryCode in numbersByCountryService) {
+    const country = countries[countryCode];
+    const countryName = country ? `${country.flag} ${country.name}` : `Country ${countryCode}`;
+
+    report += `${countryName} (+${countryCode}):\n`;
+
+    for (const serviceId in numbersByCountryService[countryCode]) {
+      const service = services[serviceId];
+      const count = numbersByCountryService[countryCode][serviceId].length;
+
+      if (count > 0) {
+        report += `  ${service?.icon || '📞'} ${service?.name || serviceId}: ${count}\n`;
+
+        buttons.push([
+          { 
+            text: `🗑️ ${countryCode}/${serviceId} (${count})`, 
+            callback_data: `admin_delete_confirm:${countryCode}:${serviceId}` 
+          }
+        ]);
+      }
     }
+    report += "\n";
   }
-  btns.push([{ text: "❌ Cancel", callback_data: "admin_cancel" }]);
-  await ctx.editMessageText("🗑️ *Delete Numbers*", { parse_mode: "Markdown", reply_markup: { inline_keyboard: btns } });
+
+  buttons.push([{ text: "❌ Cancel", callback_data: "admin_cancel" }]);
+
+  await ctx.editMessageText(report, {
+    parse_mode: "Markdown",
+    reply_markup: { inline_keyboard: buttons }
+  });
 });
 
 bot.action(/^admin_delete_confirm:(.+):(.+)$/, async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  const cc = ctx.match[1], sid = ctx.match[2];
-  const count = numbersByCountryService[cc]?.[sid]?.length || 0;
-  await ctx.editMessageText(`⚠️ *Delete ${count} numbers?*\nCountry: ${cc}\nService: ${services[sid]?.name || sid}`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "✅ Yes", callback_data: `admin_delete_execute:${cc}:${sid}` }, { text: "❌ No", callback_data: "admin_back" }]] } });
+
+  const countryCode = ctx.match[1];
+  const serviceId = ctx.match[2];
+
+  const count = numbersByCountryService[countryCode]?.[serviceId]?.length || 0;
+
+  await ctx.editMessageText(
+    `⚠️ *Confirm Deletion*\n\n` +
+    `Are you sure you want to delete ${count} numbers?\n` +
+    `Country: ${countryCode}\n` +
+    `Service: ${services[serviceId]?.name || serviceId}\n\n` +
+    `This action cannot be undone!`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "✅ Yes, Delete", callback_data: `admin_delete_execute:${countryCode}:${serviceId}` },
+            { text: "❌ Cancel", callback_data: "admin_back" }
+          ]
+        ]
+      }
+    }
+  );
 });
 
 bot.action(/^admin_delete_execute:(.+):(.+)$/, async (ctx) => {
   if (!ctx.session.isAdmin) return await ctx.answerCbQuery("❌ Admin only");
   await ctx.answerCbQuery();
-  const cc = ctx.match[1], sid = ctx.match[2];
-  delete numbersByCountryService[cc][sid];
-  if (Object.keys(numbersByCountryService[cc]).length === 0) delete numbersByCountryService[cc];
+
+  const countryCode = ctx.match[1];
+  const serviceId = ctx.match[2];
+
+  const count = numbersByCountryService[countryCode]?.[serviceId]?.length || 0;
+
+  delete numbersByCountryService[countryCode][serviceId];
+
+  if (Object.keys(numbersByCountryService[countryCode]).length === 0) {
+    delete numbersByCountryService[countryCode];
+  }
+
   saveNumbers();
-  await ctx.editMessageText(`✅ *Deleted*`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back", callback_data: "admin_back" }]] } });
+
+  await ctx.editMessageText(
+    `✅ *Deleted Successfully*\n\n` +
+    `🗑️ Deleted ${count} numbers\n` +
+    `📌 Country: ${countryCode}\n` +
+    `🔧 Service: ${services[serviceId]?.name || serviceId}`,
+    {
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🔙 Back to Admin", callback_data: "admin_back" }]
+        ]
+      }
+    }
+  );
 });
 
 /******************** TEXT INPUT HANDLER ********************/
 bot.on("text", async (ctx, next) => {
-  if (!ctx.message || !ctx.message.text) return next();
-  const text = ctx.message.text.trim();
-  const userId = ctx.from.id.toString();
-  const KEYBOARD_BUTTONS = ["☎️ Get Number", "📞 Get Numbers", "📧 Get Tempmail", "📧 Temp Mail", "🔐 2FA", "🔐 2FA Codes", "💰 Balances", "💸 Withdraw", "💬 Support", "🏠 Home", "🏠 Main Menu", "ℹ️ Help"];
-  if (KEYBOARD_BUTTONS.includes(text)) { ctx.session.withdrawState = null; ctx.session.withdrawData = null; ctx.session.totpState = null; ctx.session.totpData = null; ctx.session.adminState = null; ctx.session.adminData = null; return next(); }
-  if (text.startsWith('/')) return next();
-  
-  if (ctx.session.totpState === "waiting_secret") {
-    const secret = text.replace(/\s/g, "").toUpperCase();
-    const result = generateTOTP(secret);
-    if (!result) return await ctx.reply("❌ *Invalid secret key*", { parse_mode: "Markdown" });
-    const { service } = ctx.session.totpData || {};
-    const icon = service === "facebook" ? "📘" : service === "instagram" ? "📸" : service === "google" ? "🔍" : "⚙️";
-    const name = service === "facebook" ? "Facebook" : service === "instagram" ? "Instagram" : service === "google" ? "Google" : "2FA";
-    ctx.session.totpState = null;
-    return await ctx.reply(`${icon} *${name} 2FA Code*\n\n🔑 \`${result.token}\`\n⏰ ${result.timeRemaining}s`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔄 Refresh", callback_data: `totp_refresh:${service}:${encodeURIComponent(secret)}` }]] } });
+  try {
+    if (!ctx.message || !ctx.message.text) return;
+    const text = ctx.message.text.trim();
+    const userId = ctx.from.id.toString();
+
+    const KEYBOARD_BUTTONS = [
+      "☎️ Get Number", "📞 Get Numbers",
+      "📧 Get Tempmail", "📧 Temp Mail",
+      "🔐 2FA", "🔐 2FA Codes",
+      "💰 Balances",
+      "💸 Withdraw",
+      "💬 Support",
+      "🏠 Home", "🏠 Main Menu",
+      "ℹ️ Help"
+    ];
+
+    if (KEYBOARD_BUTTONS.includes(text)) {
+      ctx.session.withdrawState = null;
+      ctx.session.withdrawData = null;
+      ctx.session.totpState = null;
+      ctx.session.totpData = null;
+      ctx.session.adminState = null;
+      ctx.session.adminData = null;
+      return next();
+    }
+
+    if (text.startsWith('/')) return;
+
+    // TOTP Secret Key input
+    if (ctx.session.totpState === "waiting_secret") {
+      const secret = text.replace(/\s/g, "").toUpperCase();
+      const result = generateTOTP(secret);
+      if (!result) {
+        return await ctx.reply(
+          "❌ *Invalid Secret Key!*\n\nUse Base32 format.\nExample: `JBSWY3DPEHPK3PXP`\n\nType /cancel to cancel",
+          { parse_mode: "Markdown" }
+        );
+      }
+      const { service } = ctx.session.totpData || {};
+      const icon = service === "facebook" ? "📘" : service === "instagram" ? "📸" : service === "google" ? "🔍" : "⚙️";
+      const name = service === "facebook" ? "Facebook" : service === "instagram" ? "Instagram" : service === "google" ? "Google" : "2FA";
+      ctx.session.totpState = null;
+      ctx.session.totpData = { service, secret };
+      return await ctx.reply(
+        `${icon} *${name} 2FA Code*\n\n` +
+        `🔑 *Code:* \`${result.token}\`\n\n` +
+        `⏰ *${result.timeRemaining} seconds remaining*\n\n` +
+        `📋 Copy the code and enter it on the site.`,
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "🔄 Refresh Code", callback_data: `totp_refresh:${service}:${encodeURIComponent(secret)}` }],
+              [{ text: "🔙 Back", callback_data: "totp_back" }]
+            ]
+          }
+        }
+      );
+    }
+
+    // Withdraw: manual amount input
+    if (ctx.session.withdrawState === "waiting_amount") {
+      const amount = parseFloat(text);
+      const userEarnings = getUserEarnings(userId);
+      const { method } = ctx.session.withdrawData || {};
+
+      if (!method) {
+        ctx.session.withdrawState = null;
+        return await ctx.reply("❌ Please start over.", { parse_mode: "Markdown" });
+      }
+      if (isNaN(amount) || amount <= 0) {
+        return await ctx.reply("❌ Enter a valid amount.\nExample: `75`", { parse_mode: "Markdown" });
+      }
+      if (amount < settings.minWithdraw) {
+        return await ctx.reply(`❌ Minimum *${settings.minWithdraw} taka* is required.`, { parse_mode: "Markdown" });
+      }
+      if (amount > userEarnings.balance) {
+        return await ctx.reply(`❌ Insufficient balance! Your balance: *${userEarnings.balance.toFixed(2)} taka*`, { parse_mode: "Markdown" });
+      }
+      const icon = method === "bKash" ? "🟣" : "🟠";
+      ctx.session.withdrawData = { method, amount };
+      ctx.session.withdrawState = "waiting_account";
+      return await ctx.reply(
+        `${icon} *${method} - ${amount.toFixed(2)} taka*\n\n` +
+        `📱 Your *${method} number:*\nExample: \`01712345678\`\n\nType /cancel to cancel`,
+        {
+          parse_mode: "Markdown",
+          reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "withdraw_cancel" }]] }
+        }
+      );
+    }
+
+    // Withdraw account number input
+    if (ctx.session.withdrawState === "waiting_account") {
+      const account = text;
+      if (!/^01[3-9]\d{8}$/.test(account)) {
+        return await ctx.reply(
+          "❌ *Invalid number!*\n\nEnter a valid Bangladeshi number: `01XXXXXXXXX`\n\nType /cancel to cancel",
+          { parse_mode: "Markdown" }
+        );
+      }
+      const userEarnings = getUserEarnings(userId);
+      const { method, amount } = ctx.session.withdrawData;
+      if (userEarnings.balance < amount) {
+        ctx.session.withdrawState = null;
+        ctx.session.withdrawData = null;
+        return await ctx.reply("❌ *Balance has changed.* Please try again.", { parse_mode: "Markdown" });
+      }
+      ctx.session.withdrawData = { method, account, amount };
+      ctx.session.withdrawState = "confirm";
+      const icon = method === "bKash" ? "🟣" : "🟠";
+      return await ctx.reply(
+        `✅ *Confirm Withdrawal*\n\n` +
+        `${icon} *Method:* ${method}\n` +
+        `📱 *Account:* ${account}\n` +
+        `💵 *Amount:* ${amount.toFixed(2)} taka\n\n` +
+        `Is all information correct?`,
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "✅ Yes, Withdraw", callback_data: "withdraw_confirm" },
+                { text: "❌ Cancel", callback_data: "withdraw_cancel" }
+              ]
+            ]
+          }
+        }
+      );
+    }
+
+    // Admin-only states
+    if (!ctx.session.isAdmin || !ctx.session.adminState) return;
+    const adminState = ctx.session.adminState;
+
+    if (adminState === "waiting_set_count") {
+      const count = parseInt(text);
+      if (isNaN(count) || count < 1 || count > 100) {
+        return await ctx.reply("❌ Enter a number between 1 and 100.");
+      }
+      settings.defaultNumberCount = count;
+      saveSettings();
+      ctx.session.adminState = null;
+      await ctx.reply(`✅ *Number Count Set: ${count}*`,
+        { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back to Settings", callback_data: "admin_settings" }]] } });
+
+    } else if (adminState === "waiting_set_cooldown") {
+      const seconds = parseInt(text);
+      if (isNaN(seconds) || seconds < 1 || seconds > 3600) {
+        return await ctx.reply("❌ Enter a number between 1 and 3600.");
+      }
+      settings.cooldownSeconds = seconds;
+      saveSettings();
+      ctx.session.adminState = null;
+      await ctx.reply(`✅ *Cooldown Set: ${seconds} seconds*`,
+        { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back to Settings", callback_data: "admin_settings" }]] } });
+
+    } else if (adminState === "waiting_set_default_price") {
+      const price = parseFloat(text);
+      if (isNaN(price) || price < 0) {
+        return await ctx.reply("❌ Enter a valid price.");
+      }
+      settings.defaultOtpPrice = price;
+      saveSettings();
+      ctx.session.adminState = null;
+      await ctx.reply(`✅ *Default OTP Price Set: ${price.toFixed(2)} taka*`,
+        { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back to Settings", callback_data: "admin_settings" }]] } });
+
+    } else if (adminState === "waiting_set_min_withdraw") {
+      const amount = parseFloat(text);
+      if (isNaN(amount) || amount < 1) {
+        return await ctx.reply("❌ Enter a valid amount.");
+      }
+      settings.minWithdraw = amount;
+      saveSettings();
+      ctx.session.adminState = null;
+      await ctx.reply(`✅ *Min Withdraw Set: ${amount} taka*`,
+        { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back to Settings", callback_data: "admin_settings" }]] } });
+
+    } else if (adminState === "waiting_broadcast") {
+      const message = text;
+      let sent = 0, failed = 0;
+      for (const uid of Object.keys(users)) {
+        try {
+          await bot.telegram.sendMessage(uid, message, { parse_mode: "Markdown" });
+          sent++;
+          await new Promise(r => setTimeout(r, 50));
+        } catch (e) { failed++; }
+      }
+      ctx.session.adminState = null;
+      await ctx.reply(`📢 *Broadcast Complete!*\n\n✅ Sent: ${sent}\n❌ Failed: ${failed}`,
+        { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "admin_back" }]] } });
+
+    } else if (adminState === "waiting_add_numbers") {
+      const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+      const { countryCode, serviceId } = ctx.session.adminData || {};
+      let added = 0, failed = 0;
+      for (const line of lines) {
+        const parts = line.split("|");
+        const num = parts[0].replace(/\D/g, "");
+        const cc = parts[1] || countryCode;
+        const sid = parts[2] || serviceId;
+        if (!num || !cc || !sid) { failed++; continue; }
+        if (!numbersByCountryService[cc]) numbersByCountryService[cc] = {};
+        if (!numbersByCountryService[cc][sid]) numbersByCountryService[cc][sid] = [];
+        if (!numbersByCountryService[cc][sid].includes(num)) {
+          numbersByCountryService[cc][sid].push(num);
+          added++;
+        } else { failed++; }
+      }
+      saveNumbers();
+      ctx.session.adminState = null;
+      await ctx.reply(`✅ *Numbers Added!*\n\n✅ Added: ${added}\n❌ Failed: ${failed}`,
+        { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "admin_back" }]] } });
+
+    } else if (adminState === "waiting_add_country") {
+      const parts = text.trim().split(/\s+/);
+      if (parts.length >= 3) {
+        const countryCode = parts[0].replace(/\D/g, "");
+        const flag = parts[parts.length - 1];
+        const countryName = parts.slice(1, -1).join(" ");
+        countries[countryCode] = { name: countryName, flag: flag };
+        saveCountries();
+        ctx.session.adminState = null;
+        await ctx.reply(
+          `✅ *Country Added!*\n\n📌 Code: +${countryCode}\n🏳️ Name: ${countryName}\n${flag} Flag: ${flag}`,
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back to Countries", callback_data: "admin_manage_countries" }]] } }
+        );
+      } else {
+        await ctx.reply("❌ Format: `[code] [name] [flag]`\nExample: `880 Bangladesh 🇧🇩`", { parse_mode: "Markdown" });
+      }
+
+    } else if (adminState === "waiting_add_service") {
+      const parts = text.trim().split(/\s+/);
+      if (parts.length >= 3) {
+        const serviceId = parts[0].toLowerCase();
+        const serviceName = parts.slice(1, -1).join(" ");
+        const icon = parts[parts.length - 1];
+        services[serviceId] = { name: serviceName, icon: icon };
+        saveServices();
+        ctx.session.adminState = null;
+        await ctx.reply(
+          `✅ *Service Added!*\n\n📌 ID: \`${serviceId}\`\n🔧 Name: ${serviceName}\n${icon} Icon: ${icon}`,
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Back to Services", callback_data: "admin_manage_services" }]] } }
+        );
+      } else {
+        await ctx.reply("❌ Format: `[id] [name] [icon]`\nExample: `facebook Facebook 📘`", { parse_mode: "Markdown" });
+      }
+
+    } else if (adminState === "waiting_add_balance") {
+      const parts = text.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        const targetId = parts[0];
+        const amount = parseFloat(parts[1]);
+        if (isNaN(amount) || amount <= 0) return await ctx.reply("❌ Enter a valid amount.");
+        const targetEarnings = getUserEarnings(targetId);
+        targetEarnings.balance += amount;
+        saveEarnings();
+        ctx.session.adminState = null;
+        await ctx.reply(`✅ *${amount.toFixed(2)} taka added to ${targetId}.*\nNew Balance: ${targetEarnings.balance.toFixed(2)} taka`,
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Balance Management", callback_data: "admin_balance_manage" }]] } });
+      } else {
+        await ctx.reply("❌ Format: `[userId] [amount]`", { parse_mode: "Markdown" });
+      }
+
+    } else if (adminState === "waiting_deduct_balance") {
+      const parts = text.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        const targetId = parts[0];
+        const amount = parseFloat(parts[1]);
+        if (isNaN(amount) || amount <= 0) return await ctx.reply("❌ Enter a valid amount.");
+        const targetEarnings = getUserEarnings(targetId);
+        targetEarnings.balance = Math.max(0, targetEarnings.balance - amount);
+        saveEarnings();
+        ctx.session.adminState = null;
+        await ctx.reply(`✅ *${amount.toFixed(2)} taka deducted from ${targetId}.*\nNew Balance: ${targetEarnings.balance.toFixed(2)} taka`,
+          { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Balance Management", callback_data: "admin_balance_manage" }]] } });
+      } else {
+        await ctx.reply("❌ Format: `[userId] [amount]`", { parse_mode: "Markdown" });
+      }
+
+    } else if (adminState === "waiting_reset_balance") {
+      const targetId = text.trim();
+      const targetEarnings = getUserEarnings(targetId);
+      targetEarnings.balance = 0;
+      saveEarnings();
+      ctx.session.adminState = null;
+      await ctx.reply(`✅ *${targetId}'s balance reset to 0.*`,
+        { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Balance Management", callback_data: "admin_balance_manage" }]] } });
+
+    } else if (adminState === "waiting_set_country_price") {
+      const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+      let updated = 0, failed = 0;
+      for (const line of lines) {
+        const parts = line.split(/[:\s]+/);
+        if (parts.length >= 2) {
+          const cc = parts[0].replace(/\D/g, "");
+          const price = parseFloat(parts[1]);
+          if (cc && !isNaN(price) && price >= 0) {
+            countryPrices[cc] = price;
+            updated++;
+          } else { failed++; }
+        } else { failed++; }
+      }
+      saveCountryPrices();
+      ctx.session.adminState = null;
+      await ctx.reply(`✅ *Prices Updated!*\n\n✅ Updated: ${updated}\n❌ Failed: ${failed}`,
+        { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Country Prices", callback_data: "admin_country_prices" }]] } });
+    }
+
+  } catch (err) {
+    console.error("Text handler error:", err);
   }
-  
-  if (ctx.session.withdrawState === "waiting_amount") {
-    const amount = parseFloat(text);
-    const e = getUserEarnings(userId);
-    const { method } = ctx.session.withdrawData || {};
-    if (!method) { ctx.session.withdrawState = null; return await ctx.reply("❌ Start over", { parse_mode: "Markdown" }); }
-    if (isNaN(amount) || amount <= 0) return await ctx.reply("❌ Valid amount", { parse_mode: "Markdown" });
-    if (amount < settings.minWithdraw) return await ctx.reply(`❌ Min ${settings.minWithdraw} TK`, { parse_mode: "Markdown" });
-    if (amount > e.balance) return await ctx.reply(`❌ Balance: ${e.balance.toFixed(2)} TK`, { parse_mode: "Markdown" });
-    ctx.session.withdrawData = { method, amount };
-    ctx.session.withdrawState = "waiting_account";
-    return await ctx.reply(`📱 Your *${method} number:*\nExample: \`01712345678\``, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "withdraw_cancel" }]] } });
-  }
-  
-  if (ctx.session.withdrawState === "waiting_account") {
-    const account = text;
-    if (!/^01[3-9]\d{8}$/.test(account)) return await ctx.reply("❌ Invalid number", { parse_mode: "Markdown" });
-    const e = getUserEarnings(userId);
-    const { method, amount } = ctx.session.withdrawData;
-    if (e.balance < amount) { ctx.session.withdrawState = null; return await ctx.reply("❌ Balance changed", { parse_mode: "Markdown" }); }
-    ctx.session.withdrawData = { method, account, amount };
-    ctx.session.withdrawState = "confirm";
-    const icon = method === "bKash" ? "🟣" : "🟠";
-    return await ctx.reply(`${icon} *${method} - ${amount.toFixed(2)} TK*\n📱 ${account}\n\nConfirm?`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "✅ Confirm", callback_data: "withdraw_confirm" }, { text: "❌ Cancel", callback_data: "withdraw_cancel" }]] } });
-  }
-  
-  if (!ctx.session.isAdmin || !ctx.session.adminState) return next();
-  const state = ctx.session.adminState;
-  
-  if (state === "waiting_set_count") { const n = parseInt(text); if (n >= 1 && n <= 100) { settings.defaultNumberCount = n; saveSettings(); ctx.session.adminState = null; await ctx.reply(`✅ Set to ${n}`, { reply_markup: { inline_keyboard: [[{ text: "🔙 Settings", callback_data: "admin_settings" }]] } }); } else await ctx.reply("❌ 1-100"); }
-  else if (state === "waiting_set_cooldown") { const n = parseInt(text); if (n >= 1 && n <= 3600) { settings.cooldownSeconds = n; saveSettings(); ctx.session.adminState = null; await ctx.reply(`✅ Set to ${n}s`, { reply_markup: { inline_keyboard: [[{ text: "🔙 Settings", callback_data: "admin_settings" }]] } }); } else await ctx.reply("❌ 1-3600"); }
-  else if (state === "waiting_set_default_price") { const p = parseFloat(text); if (!isNaN(p) && p >= 0) { settings.defaultOtpPrice = p; saveSettings(); ctx.session.adminState = null; await ctx.reply(`✅ Price: ${p.toFixed(2)} TK`, { reply_markup: { inline_keyboard: [[{ text: "🔙 Settings", callback_data: "admin_settings" }]] } }); } else await ctx.reply("❌ Valid price"); }
-  else if (state === "waiting_set_min_withdraw") { const a = parseFloat(text); if (!isNaN(a) && a >= 1) { settings.minWithdraw = a; saveSettings(); ctx.session.adminState = null; await ctx.reply(`✅ Min: ${a} TK`, { reply_markup: { inline_keyboard: [[{ text: "🔙 Settings", callback_data: "admin_settings" }]] } }); } else await ctx.reply("❌ Valid amount"); }
-  else if (state === "waiting_broadcast") { let s=0,f=0; for(const uid of Object.keys(users)) { try{ await bot.telegram.sendMessage(uid, text); s++; await new Promise(r=>setTimeout(r,50)); }catch(e){ f++; } } ctx.session.adminState=null; await ctx.reply(`📢 Broadcast\n✅ Sent: ${s}\n❌ Failed: ${f}`, { reply_markup: { inline_keyboard: [[{ text: "🔙 Admin", callback_data: "admin_back" }]] } }); }
-  else if (state === "waiting_add_numbers") { const lines = text.split("\n").map(l=>l.trim()).filter(Boolean); let a=0,f=0; for(const line of lines){ const parts=line.split("|"); const num=parts[0].replace(/\D/g,""); const cc=parts[1]; const sid=parts[2]; if(!num||!cc||!sid){ f++; continue; } if(!numbersByCountryService[cc]) numbersByCountryService[cc]={}; if(!numbersByCountryService[cc][sid]) numbersByCountryService[cc][sid]=[]; if(!numbersByCountryService[cc][sid].includes(num)){ numbersByCountryService[cc][sid].push(num); a++; }else f++; } saveNumbers(); ctx.session.adminState=null; await ctx.reply(`✅ Added: ${a}\n❌ Failed: ${f}`, { reply_markup: { inline_keyboard: [[{ text: "🔙 Admin", callback_data: "admin_back" }]] } }); }
-  else if (state === "waiting_add_country") { const parts=text.split(/\s+/); if(parts.length>=3){ const cc=parts[0].replace(/\D/g,""); const flag=parts[parts.length-1]; const name=parts.slice(1,-1).join(" "); countries[cc]={name,flag}; saveCountries(); ctx.session.adminState=null; await ctx.reply(`✅ Added ${name} (+${cc})`, { reply_markup: { inline_keyboard: [[{ text: "🔙 Countries", callback_data: "admin_manage_countries" }]] } }); } else await ctx.reply("❌ Format: code name flag"); }
-  else if (state === "waiting_add_service") { const parts=text.split(/\s+/); if(parts.length>=3){ const sid=parts[0].toLowerCase(); const icon=parts[parts.length-1]; const name=parts.slice(1,-1).join(" "); services[sid]={name,icon}; saveServices(); ctx.session.adminState=null; await ctx.reply(`✅ Added ${name} (${sid})`, { reply_markup: { inline_keyboard: [[{ text: "🔙 Services", callback_data: "admin_manage_services" }]] } }); } else await ctx.reply("❌ Format: id name icon"); }
-  else if (state === "waiting_add_balance") { const p=text.split(/\s+/); if(p.length>=2){ const uid=p[0]; const amt=parseFloat(p[1]); if(!isNaN(amt)&&amt>0){ const e=getUserEarnings(uid); e.balance+=amt; saveEarnings(); ctx.session.adminState=null; await ctx.reply(`✅ Added ${amt} TK to ${uid}\nNew balance: ${e.balance.toFixed(2)} TK`, { reply_markup: { inline_keyboard: [[{ text: "🔙 Balance", callback_data: "admin_balance_manage" }]] } }); } else await ctx.reply("❌ Valid amount"); } else await ctx.reply("❌ Format: user_id amount"); }
-  else if (state === "waiting_deduct_balance") { const p=text.split(/\s+/); if(p.length>=2){ const uid=p[0]; const amt=parseFloat(p[1]); if(!isNaN(amt)&&amt>0){ const e=getUserEarnings(uid); e.balance=Math.max(0,e.balance-amt); saveEarnings(); ctx.session.adminState=null; await ctx.reply(`✅ Deducted ${amt} TK from ${uid}\nNew balance: ${e.balance.toFixed(2)} TK`, { reply_markup: { inline_keyboard: [[{ text: "🔙 Balance", callback_data: "admin_balance_manage" }]] } }); } else await ctx.reply("❌ Valid amount"); } else await ctx.reply("❌ Format: user_id amount"); }
-  else if (state === "waiting_reset_balance") { const uid=text.trim(); const e=getUserEarnings(uid); e.balance=0; saveEarnings(); ctx.session.adminState=null; await ctx.reply(`✅ Reset ${uid} balance to 0`, { reply_markup: { inline_keyboard: [[{ text: "🔙 Balance", callback_data: "admin_balance_manage" }]] } }); }
-  else if (state === "waiting_set_country_price") { const lines=text.split("\n").map(l=>l.trim()).filter(Boolean); let u=0; for(const line of lines){ const parts=line.split(/[:\s]+/); if(parts.length>=2){ const cc=parts[0].replace(/\D/g,""); const price=parseFloat(parts[1]); if(cc&&!isNaN(price)&&price>=0){ countryPrices[cc]=price; u++; } } } saveCountryPrices(); ctx.session.adminState=null; await ctx.reply(`✅ Updated ${u} countries`, { reply_markup: { inline_keyboard: [[{ text: "🔙 Prices", callback_data: "admin_country_prices" }]] } }); }
 });
 
 /******************** ADMIN FILE UPLOAD HANDLER ********************/
 bot.on("document", async (ctx) => {
-  if (!ctx.session.isAdmin) return;
-  if (ctx.session.adminState !== "waiting_upload_file") return;
-  const doc = ctx.message.document;
-  if (!doc || !doc.file_name || !doc.file_name.endsWith(".txt")) return await ctx.reply("❌ Send .txt file");
-  const { serviceId } = ctx.session.adminData || {};
-  if (!serviceId) return await ctx.reply("❌ Session expired");
-  await ctx.reply("⏳ Processing...");
-  const fileLink = await ctx.telegram.getFileLink(doc.file_id);
-  const fileContent = await new Promise((resolve, reject) => { https.get(fileLink.href, (res) => { let d = ""; res.on("data", c => d += c); res.on("end", () => resolve(d)); res.on("error", reject); }).on("error", reject); });
-  const lines = fileContent.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  let added = 0, failed = 0;
-  for (const line of lines) {
-    let number, countryCode, service;
-    if (line.includes("|")) { const parts = line.split("|"); number = parts[0].replace(/\D/g, ""); countryCode = parts[1] ? parts[1].trim() : null; service = parts[2] ? parts[2].trim() : serviceId; }
-    else { number = line.replace(/\D/g, ""); countryCode = getCountryCodeFromNumber(number); service = serviceId; }
-    if (!number || !/^\d{10,15}$/.test(number)) { failed++; continue; }
-    if (!countryCode) { failed++; continue; }
-    if (!service) service = serviceId;
-    if (!numbersByCountryService[countryCode]) numbersByCountryService[countryCode] = {};
-    if (!numbersByCountryService[countryCode][service]) numbersByCountryService[countryCode][service] = [];
-    if (!numbersByCountryService[countryCode][service].includes(number)) { numbersByCountryService[countryCode][service].push(number); added++; }
-    else failed++;
+  try {
+    if (!ctx.session.isAdmin) return;
+    if (ctx.session.adminState !== "waiting_upload_file") return;
+
+    const doc = ctx.message.document;
+    if (!doc || !doc.file_name || !doc.file_name.endsWith(".txt")) {
+      return await ctx.reply("❌ *Only .txt files are supported.*\n\nPlease send a plain text file.", { parse_mode: "Markdown" });
+    }
+
+    const { serviceId } = ctx.session.adminData || {};
+    if (!serviceId) {
+      return await ctx.reply("❌ Session expired. Please start again via /admin → Upload File.", { parse_mode: "Markdown" });
+    }
+
+    await ctx.reply("⏳ *Processing file...*", { parse_mode: "Markdown" });
+
+    const fileLink = await ctx.telegram.getFileLink(doc.file_id);
+    const fileUrl = fileLink.href || fileLink.toString();
+
+    const fileContent = await new Promise((resolve, reject) => {
+      https.get(fileUrl, (res) => {
+        let data = "";
+        res.on("data", chunk => data += chunk);
+        res.on("end", () => resolve(data));
+        res.on("error", reject);
+      }).on("error", reject);
+    });
+
+    const lines = fileContent.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    let added = 0, failed = 0;
+
+    for (const line of lines) {
+      let number, countryCode, service;
+
+      if (line.includes("|")) {
+        const parts = line.split("|");
+        number = parts[0].replace(/\D/g, "");
+        countryCode = parts[1] ? parts[1].trim() : null;
+        service = parts[2] ? parts[2].trim() : serviceId;
+      } else {
+        number = line.replace(/\D/g, "");
+        countryCode = getCountryCodeFromNumber(number);
+        service = serviceId;
+      }
+
+      if (!number || !/^\d{10,15}$/.test(number)) { failed++; continue; }
+      if (!countryCode) { failed++; continue; }
+      if (!service) service = serviceId;
+
+      if (!numbersByCountryService[countryCode]) numbersByCountryService[countryCode] = {};
+      if (!numbersByCountryService[countryCode][service]) numbersByCountryService[countryCode][service] = [];
+
+      if (!numbersByCountryService[countryCode][service].includes(number)) {
+        numbersByCountryService[countryCode][service].push(number);
+        added++;
+      } else {
+        failed++;
+      }
+    }
+
+    saveNumbers();
+    ctx.session.adminState = null;
+    ctx.session.adminData = null;
+
+    await ctx.reply(
+      `✅ *File Upload Complete!*\n\n` +
+      `📄 File: ${doc.file_name}\n` +
+      `✅ Added: ${added}\n` +
+      `❌ Skipped/Duplicate: ${failed}\n` +
+      `📊 Total lines: ${lines.length}`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: { inline_keyboard: [[{ text: "🔙 Admin Panel", callback_data: "admin_back" }]] }
+      }
+    );
+
+  } catch (error) {
+    console.error("Document upload error:", error);
+    await ctx.reply("❌ Upload failed. Please try again.\n\nError: " + error.message);
+    ctx.session.adminState = null;
   }
-  saveNumbers();
-  ctx.session.adminState = null;
-  ctx.session.adminData = null;
-  await ctx.reply(`✅ *Upload Complete*\n📄 ${doc.file_name}\n✅ Added: ${added}\n❌ Failed: ${failed}`, { parse_mode: "Markdown", reply_markup: { inline_keyboard: [[{ text: "🔙 Admin", callback_data: "admin_back" }]] } });
 });
 
 /******************** OTP GROUP MONITORING ********************/
@@ -2197,12 +4066,24 @@ bot.on("chat_member", async (ctx) => {
     if (!userId) return;
     const oldStatus = member.old_chat_member?.status;
     const newStatus = member.new_chat_member?.status;
-    const isRequired = chatId === MAIN_CHANNEL_ID?.toString() || chatId === CHAT_GROUP_ID?.toString() || chatId === OTP_GROUP_ID?.toString();
-    if (!isRequired) return;
+    const isRequiredGroup = (
+      chatId === MAIN_CHANNEL_ID?.toString() ||
+      chatId === CHAT_GROUP_ID?.toString() ||
+      chatId === OTP_GROUP_ID?.toString()
+    );
+    if (!isRequiredGroup) return;
     const wasActive = ["member", "administrator", "creator"].includes(oldStatus);
     const nowGone = ["left", "kicked", "restricted"].includes(newStatus);
-    if (wasActive && nowGone && users[userId]) { users[userId].verified = false; saveUsers(); console.log(`🚫 User ${userId} left`); }
-  } catch(e) {}
+    if (wasActive && nowGone) {
+      if (users[userId]) {
+        users[userId].verified = false;
+        saveUsers();
+      }
+      console.log(`🚫 User ${userId} left/kicked — access revoked`);
+    }
+  } catch(e) {
+    console.error("chat_member event error:", e.message);
+  }
 });
 
 bot.on("message", async (ctx, next) => {
@@ -2210,31 +4091,52 @@ bot.on("message", async (ctx, next) => {
     const chatId = ctx.chat.id;
     const isOtpGroup = chatId === OTP_GROUP_ID || chatId === Number(OTP_GROUP_ID) || chatId.toString() === OTP_GROUP_ID.toString();
     if (!isOtpGroup) return next();
-    const text = ctx.message.text || ctx.message.caption || '';
-    const msgId = ctx.message.message_id;
-    if (!text) return;
-    const matched = findMatchingActiveNumber(text);
-    if (!matched) return;
-    const data = activeNumbers[matched];
-    const userId = data.userId;
-    const countryCode = data.countryCode || '';
-    if (data.lastOTP === msgId) return;
-    data.lastOTP = msgId;
-    data.otpCount = (data.otpCount || 0) + 1;
+
+    const messageText = ctx.message.text || ctx.message.caption || '';
+    const messageId = ctx.message.message_id;
+    if (!messageText) return;
+
+    const matchedNumber = findMatchingActiveNumber(messageText);
+    if (!matchedNumber) return;
+
+    const userData = activeNumbers[matchedNumber];
+    const userId = userData.userId;
+    const countryCode = userData.countryCode || '';
+
+    if (userData.lastOTP === messageId) return;
+    userData.lastOTP = messageId;
+    userData.otpCount = (userData.otpCount || 0) + 1;
     saveActiveNumbers();
-    const otp = extractOTPCode(text);
+
+    const otpCode = extractOTPCode(messageText);
     const earned = addEarning(userId, countryCode);
-    const balance = getUserEarnings(userId).balance;
-    const service = services[data.service] || { icon: '📱', name: data.service };
+    const userBalance = getUserEarnings(userId).balance;
+    const service = services[userData.service] || { icon: '📱', name: userData.service };
     const country = countries[countryCode] || { flag: '🌍', name: countryCode };
-    let notify = `📨 *OTP Received!*\n\n${service.icon} *${service.name}*\n${country.flag} ${country.name}\n📞 \`+${matched}\``;
-    if (otp) notify += `\n\n🔑 *OTP:* \`${otp}\``;
-    notify += `\n\n💵 +${earned.toFixed(2)} TK\n💰 Balance: ${balance.toFixed(2)} TK`;
-    await ctx.telegram.sendMessage(userId, notify, { parse_mode: 'Markdown' });
-    await ctx.telegram.forwardMessage(userId, OTP_GROUP_ID, msgId);
-    otpLog.push({ phoneNumber: matched, userId, countryCode, service: data.service, otpCode: otp || null, earned, messageId: msgId, delivered: true, timestamp: new Date().toISOString() });
+
+    let notifyText = `📨 *OTP Received!*\n\n${service.icon} *Service:* ${service.name}\n${country.flag} *Country:* ${country.name}\n📞 *Number:* \`+${matchedNumber}\`\n`;
+    if (otpCode) notifyText += `\n🔑 *OTP Code:* \`${otpCode}\`\n`;
+    notifyText += `\n💵 *+${earned.toFixed(2)} taka earned!*\n💰 *Current Balance: ${userBalance.toFixed(2)} taka*`;
+
+    await ctx.telegram.sendMessage(userId, notifyText, { parse_mode: 'Markdown' });
+    await ctx.telegram.forwardMessage(userId, OTP_GROUP_ID, messageId);
+
+    otpLog.push({
+      phoneNumber: matchedNumber,
+      userId,
+      countryCode,
+      service: userData.service,
+      otpCode: otpCode || null,
+      earned,
+      messageId,
+      delivered: true,
+      timestamp: new Date().toISOString()
+    });
     saveOTPLog();
-  } catch (error) { console.error('OTP error:', error); }
+
+  } catch (error) {
+    console.error('OTP monitoring error:', error);
+  }
 });
 
 /******************** START BOT ********************/
@@ -2242,28 +4144,61 @@ async function startBot() {
   try {
     console.log("=====================================");
     console.log("🚀 Starting Number Bot...");
-    console.log("✅ Backup system: FULLY FIXED");
+    console.log("✅ Verification system: FIXED");
+    console.log("✅ Backup system: ACTIVE");
     console.log("✅ Auto-restore: ENABLED");
-    console.log("✅ Backup Group ID: " + BACKUP_GROUP_ID);
     console.log("=====================================");
-    await bot.launch({ allowedUpdates: ["message", "callback_query", "chat_member", "my_chat_member", "document"] });
-    console.log("✅ Bot started!");
+
+    await bot.launch({
+      allowedUpdates: [
+        "message",
+        "callback_query",
+        "chat_member",
+        "my_chat_member",
+        "document"
+      ]
+    });
+
+    console.log("✅ Bot started successfully!");
+    
+    // অটো রিস্টোর চেক
     await autoRestoreOnStart();
-    setInterval(async () => { await createTelegramBackup(true); }, 24 * 60 * 60 * 1000);
+    
+    // অটো ব্যাকআপ (প্রতিদিন রাত ১২টায়)
+    setInterval(async () => {
+      console.log("📦 Creating auto backup...");
+      await createTelegramBackup(true);
+    }, 24 * 60 * 60 * 1000);
+    
+    // 2-hour membership check
     setInterval(async () => {
       if (!settings.requireVerification) return;
-      for (const uid of Object.keys(users)) {
+      const allUserIds = Object.keys(users);
+      for (const userId of allUserIds) {
         try {
-          const m1 = await bot.telegram.getChatMember(MAIN_CHANNEL_ID, uid);
-          const m2 = await bot.telegram.getChatMember(CHAT_GROUP_ID, uid);
-          const m3 = await bot.telegram.getChatMember(OTP_GROUP_ID, uid);
-          users[uid].verified = ['member','administrator','creator'].includes(m1.status) && ['member','administrator','creator'].includes(m2.status) && ['member','administrator','creator'].includes(m3.status);
+          const m1 = await bot.telegram.getChatMember(MAIN_CHANNEL_ID, userId);
+          const m2 = await bot.telegram.getChatMember(CHAT_GROUP_ID, userId);
+          const m3 = await bot.telegram.getChatMember(OTP_GROUP_ID, userId);
+          const allJoined = ['member', 'administrator', 'creator'].includes(m1.status) &&
+                           ['member', 'administrator', 'creator'].includes(m2.status) &&
+                           ['member', 'administrator', 'creator'].includes(m3.status);
+          users[userId].verified = allJoined;
+          if (!allJoined) {
+            console.log(`🚫 User ${userId} blocked`);
+          }
+          await new Promise(r => setTimeout(r, 100));
         } catch(e) {}
       }
       saveUsers();
     }, 2 * 60 * 60 * 1000);
-  } catch (error) { console.error("Failed:", error); setTimeout(startBot, 10000); }
+
+  } catch (error) {
+    console.error("❌ Failed to start bot:", error);
+    setTimeout(startBot, 10000);
+  }
 }
+
 startBot();
+
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
