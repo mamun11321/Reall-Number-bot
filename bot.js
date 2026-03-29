@@ -6,7 +6,7 @@ const https = require("https");
 const { authenticator } = require("otplib");
 
 /******************** YOUR CONFIGURATION ********************/
-const BOT_TOKEN = "8657128372:AAFArlAPVAaCEnriPz_3Wn3xc1EQUjH8";
+const BOT_TOKEN = "8657128372:";
 const ADMIN_PASSWORD = "mamun1132";
 
 // ⚠️ IMPORTANT: Replace the IDs below with your actual IDs ⚠️
